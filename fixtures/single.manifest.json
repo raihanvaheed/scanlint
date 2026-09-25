@@ -1,0 +1,367 @@
+{
+  "manifestVersion": 1,
+  "generator": "scripts/make-sample-study.py",
+  "pathFormat": "tag segments are 8 lowercase hex chars; sequence item segments are zero-based indices; segments joined by /",
+  "files": [
+    {
+      "file": "public/samples/single.dcm",
+      "sha256": "08f083fbc60457b5a7e6e9a150dbfbec2cb80b0b485f03bef274c03d958fb6fc",
+      "sopInstanceUid": "2.25.314159265358979323846264338327950288",
+      "transferSyntaxUid": "1.2.840.10008.1.2.1",
+      "expectedFindings": [
+        {
+          "path": "00020003",
+          "tag": "00020003",
+          "keyword": "MediaStorageSOPInstanceUID",
+          "vr": "UI",
+          "kind": "annex-e",
+          "action": "U",
+          "value": "2.25.314159265358979323846264338327950288"
+        },
+        {
+          "path": "00080018",
+          "tag": "00080018",
+          "keyword": "SOPInstanceUID",
+          "vr": "UI",
+          "kind": "annex-e",
+          "action": "U",
+          "value": "2.25.314159265358979323846264338327950288"
+        },
+        {
+          "path": "00080020",
+          "tag": "00080020",
+          "keyword": "StudyDate",
+          "vr": "DA",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "20000101"
+        },
+        {
+          "path": "00080030",
+          "tag": "00080030",
+          "keyword": "StudyTime",
+          "vr": "TM",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "120000"
+        },
+        {
+          "path": "00080050",
+          "tag": "00080050",
+          "keyword": "AccessionNumber",
+          "vr": "SH",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "SCANLINTACC01"
+        },
+        {
+          "path": "00080080",
+          "tag": "00080080",
+          "keyword": "InstitutionName",
+          "vr": "LO",
+          "kind": "annex-e",
+          "action": "X/Z/D",
+          "value": "SCANLINT TEST FACILITY"
+        },
+        {
+          "path": "00080081",
+          "tag": "00080081",
+          "keyword": "InstitutionAddress",
+          "vr": "ST",
+          "kind": "annex-e",
+          "action": "X",
+          "value": "2 SYNTHETIC ROAD, TESTVILLE"
+        },
+        {
+          "path": "00080090",
+          "tag": "00080090",
+          "keyword": "ReferringPhysicianName",
+          "vr": "PN",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "REFERRER^SYNTHETIC"
+        },
+        {
+          "path": "00081030",
+          "tag": "00081030",
+          "keyword": "StudyDescription",
+          "vr": "LO",
+          "kind": "annex-e",
+          "action": "X",
+          "value": "SYNTHETIC PHANTOM STUDY"
+        },
+        {
+          "path": "00081050",
+          "tag": "00081050",
+          "keyword": "PerformingPhysicianName",
+          "vr": "PN",
+          "kind": "annex-e",
+          "action": "X",
+          "value": "PERFORMER^SYNTHETIC"
+        },
+        {
+          "path": "00081070",
+          "tag": "00081070",
+          "keyword": "OperatorsName",
+          "vr": "PN",
+          "kind": "annex-e",
+          "action": "X/Z/D",
+          "value": "OPERATOR^SYNTHETIC"
+        },
+        {
+          "path": "00100010",
+          "tag": "00100010",
+          "keyword": "PatientName",
+          "vr": "PN",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "TESTPATIENT^SCANLINT"
+        },
+        {
+          "path": "00100020",
+          "tag": "00100020",
+          "keyword": "PatientID",
+          "vr": "LO",
+          "kind": "annex-e",
+          "action": "Z/D",
+          "value": "SCANLINT-TEST-0001"
+        },
+        {
+          "path": "00100030",
+          "tag": "00100030",
+          "keyword": "PatientBirthDate",
+          "vr": "DA",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "19700101"
+        },
+        {
+          "path": "00100040",
+          "tag": "00100040",
+          "keyword": "PatientSex",
+          "vr": "CS",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "O"
+        },
+        {
+          "path": "00101000",
+          "tag": "00101000",
+          "keyword": "OtherPatientIDs",
+          "vr": "LO",
+          "kind": "annex-e",
+          "action": "X",
+          "value": "SCANLINT-OTHER-0002"
+        },
+        {
+          "path": "00101040",
+          "tag": "00101040",
+          "keyword": "PatientAddress",
+          "vr": "LO",
+          "kind": "annex-e",
+          "action": "X",
+          "value": "1 SYNTHETIC STREET, TESTVILLE"
+        },
+        {
+          "path": "00102154",
+          "tag": "00102154",
+          "keyword": "PatientTelephoneNumbers",
+          "vr": "SH",
+          "kind": "annex-e",
+          "action": "X",
+          "value": "000-000-0000"
+        },
+        {
+          "path": "0020000d",
+          "tag": "0020000d",
+          "keyword": "StudyInstanceUID",
+          "vr": "UI",
+          "kind": "annex-e",
+          "action": "U",
+          "value": "2.25.271828182845904523536028747135266249"
+        },
+        {
+          "path": "0020000e",
+          "tag": "0020000e",
+          "keyword": "SeriesInstanceUID",
+          "vr": "UI",
+          "kind": "annex-e",
+          "action": "U",
+          "value": "2.25.161803398874989484820458683436563811"
+        },
+        {
+          "path": "00200010",
+          "tag": "00200010",
+          "keyword": "StudyID",
+          "vr": "SH",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "SCANLINT1"
+        },
+        {
+          "path": "00200052",
+          "tag": "00200052",
+          "keyword": "FrameOfReferenceUID",
+          "vr": "UI",
+          "kind": "annex-e",
+          "action": "U",
+          "value": "2.25.141421356237309504880168872420969807"
+        },
+        {
+          "path": "00280301",
+          "tag": "00280301",
+          "keyword": "BurnedInAnnotation",
+          "vr": "CS",
+          "kind": "burned-in",
+          "value": "YES"
+        },
+        {
+          "path": "00290010",
+          "tag": "00290010",
+          "vr": "LO",
+          "kind": "private",
+          "value": "SCANLINT TEST"
+        },
+        {
+          "path": "00291001",
+          "tag": "00291001",
+          "vr": "LO",
+          "kind": "private",
+          "value": "PRIVATE-NOTE-ONE"
+        },
+        {
+          "path": "00291002",
+          "tag": "00291002",
+          "vr": "LO",
+          "kind": "private",
+          "value": "PRIVATE-NOTE-TWO"
+        },
+        {
+          "path": "04000561",
+          "tag": "04000561",
+          "keyword": "OriginalAttributesSequence",
+          "vr": "SQ",
+          "kind": "annex-e",
+          "action": "X",
+          "lengthEncoding": "undefined"
+        },
+        {
+          "path": "04000561/0/04000550",
+          "tag": "04000550",
+          "keyword": "ModifiedAttributesSequence",
+          "vr": "SQ",
+          "kind": "annex-e",
+          "action": "X",
+          "lengthEncoding": "defined"
+        },
+        {
+          "path": "04000561/0/04000550/0/00080090",
+          "tag": "00080090",
+          "keyword": "ReferringPhysicianName",
+          "vr": "PN",
+          "kind": "annex-e",
+          "action": "Z",
+          "value": "NESTED^REFERRER"
+        }
+      ],
+      "expectedKept": [
+        {
+          "path": "00080060",
+          "tag": "00080060",
+          "keyword": "Modality",
+          "vr": "CS"
+        },
+        {
+          "path": "00180050",
+          "tag": "00180050",
+          "keyword": "SliceThickness",
+          "vr": "DS"
+        },
+        {
+          "path": "00180080",
+          "tag": "00180080",
+          "keyword": "RepetitionTime",
+          "vr": "DS"
+        },
+        {
+          "path": "00180081",
+          "tag": "00180081",
+          "keyword": "EchoTime",
+          "vr": "DS"
+        },
+        {
+          "path": "00180087",
+          "tag": "00180087",
+          "keyword": "MagneticFieldStrength",
+          "vr": "DS"
+        },
+        {
+          "path": "00200032",
+          "tag": "00200032",
+          "keyword": "ImagePositionPatient",
+          "vr": "DS"
+        },
+        {
+          "path": "00200037",
+          "tag": "00200037",
+          "keyword": "ImageOrientationPatient",
+          "vr": "DS"
+        },
+        {
+          "path": "00280002",
+          "tag": "00280002",
+          "keyword": "SamplesPerPixel",
+          "vr": "US"
+        },
+        {
+          "path": "00280004",
+          "tag": "00280004",
+          "keyword": "PhotometricInterpretation",
+          "vr": "CS"
+        },
+        {
+          "path": "00280010",
+          "tag": "00280010",
+          "keyword": "Rows",
+          "vr": "US"
+        },
+        {
+          "path": "00280011",
+          "tag": "00280011",
+          "keyword": "Columns",
+          "vr": "US"
+        },
+        {
+          "path": "00280030",
+          "tag": "00280030",
+          "keyword": "PixelSpacing",
+          "vr": "DS"
+        },
+        {
+          "path": "00280100",
+          "tag": "00280100",
+          "keyword": "BitsAllocated",
+          "vr": "US"
+        },
+        {
+          "path": "00280101",
+          "tag": "00280101",
+          "keyword": "BitsStored",
+          "vr": "US"
+        },
+        {
+          "path": "00280102",
+          "tag": "00280102",
+          "keyword": "HighBit",
+          "vr": "US"
+        },
+        {
+          "path": "00280103",
+          "tag": "00280103",
+          "keyword": "PixelRepresentation",
+          "vr": "US"
+        }
+      ]
+    }
+  ]
+}
