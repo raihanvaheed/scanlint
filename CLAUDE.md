@@ -65,7 +65,33 @@ Only the ones the existing code does not already demonstrate.
 - Breakage you find that is unrelated to the task: report it, do not fix it.
 - Leave nothing behind: no dead code, commented-out blocks, scratch files, or debug logging.
 
-## Definition of done
+# Explanation file
+
+At the end of every step, before writing the pull request description, write `explanation.md` at the
+repository root. It is gitignored and must never be committed. Overwrite it each step — it describes
+the current state, not a history.
+
+It is read before the PR description and exists to be short. Under 400 words. Plain language. No
+command output, no file lists, no test names, no counts unless a count is the point.
+
+Five parts, in this order:
+
+**Anything waiting on me.** One line at the top if a decision is needed, or omit the section entirely.
+
+**Where the project is.** What ScanLint can actually do today, in two or three sentences, written so
+someone who has not read the code would understand it.
+
+**What this step changed.** Two or three sentences. What is true now that was not true before.
+
+**What I can see.** Whether anything is visible in the browser yet. If not, say so plainly rather than
+describing internal progress as though it were visible.
+
+**What is next.** The next step's number and what it will do, in one sentence.
+
+Write it as though explaining to someone who has been away for a week. The PR description is where
+detail belongs; this file is where clarity does.
+
+# Definition of done
 
 Before the final message, all of these are true.
 
