@@ -60,6 +60,46 @@ describe("project invariants", () => {
     }
   });
 
+  describe("the import boundary around the worker", () => {
+    const UI_DIRS = ["src/app", "src/components"];
+    const importSpecifiers = (content: string) =>
+      [...content.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((m) => m[1]);
+    const isWorkerOnly = (spec: string) =>
+      spec === "dicom-parser" ||
+      ["walk", "handle", "phi", "dictionary"].includes(spec.split("/").pop()!.replace(/\.[jt]sx?$/, ""));
+    const filesIn = (dirs: string[]) => dirs.flatMap((dir) => listSourceFiles(path.join(ROOT, dir)));
+
+    it("no file under src/app or src/components imports the parser, the rules, or the dictionary", () => {
+      for (const file of filesIn(UI_DIRS)) {
+        const offending = importSpecifiers(fs.readFileSync(file, "utf8")).filter(isWorkerOnly);
+        expect(
+          offending,
+          `${path.relative(ROOT, file)} imports ${offending.join(", ")}. The page must not load the ` +
+            "parser, the rules or the 5,000-entry dictionary: they belong in the worker, so that " +
+            "the first screen stays small and file contents are only ever handled off the main thread.",
+        ).toEqual([]);
+      }
+    });
+
+    it("nothing outside a test refers to dictionary-keywords", () => {
+      const scanned = filesIn(["src/app", "src/components", "src/parse", "src/model", "src/rules", "src/lib"]);
+      expect(scanned.length).toBeGreaterThan(0);
+      for (const file of scanned) {
+        expect(
+          fs.readFileSync(file, "utf8").includes("dictionary-keywords"),
+          `${path.relative(ROOT, file)} refers to dictionary-keywords. That file is test data (Part 6 ` +
+            "keywords, about 230 KB) and exists only so tests can check names against the fixture manifest. " +
+            "If the app imports it, it ships to every visitor.",
+        ).toBe(false);
+      }
+    });
+
+    it("the import check does catch a forbidden import (guards against it going blind)", () => {
+      const source = 'import x from "../model/dictionary";\nimport y from "dicom-parser";\nconst z = await import("../parse/walk");\nimport t from "../model/tree";';
+      expect(importSpecifiers(source).filter(isWorkerOnly)).toEqual(["../model/dictionary", "dicom-parser", "../parse/walk"]);
+    });
+  });
+
   describe("the one network exception", () => {
     const allowlisted = NETWORK_ALLOWLIST.map((file) => ({
       file,

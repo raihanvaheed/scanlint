@@ -7,6 +7,7 @@ const BURNED_IN_ANNOTATION = "00280301";
 
 function toFinding(node: TagNode, kind: FindingKind, action?: string | null): Finding {
   const finding: Finding = { path: node.path, tag: node.tag, vr: node.vr, kind };
+  if (node.name !== undefined) finding.name = node.name;
   if (action) finding.action = action;
   if (node.value !== undefined) finding.value = node.value;
   if (node.lengthEncoding !== undefined) finding.lengthEncoding = node.lengthEncoding;
