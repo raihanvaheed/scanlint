@@ -16,6 +16,15 @@ describe("handleParse on the fixture", () => {
     expect(outcome.findings.length).toBe(29);
   });
 
+  it("names the nodes and the findings the worker returns", () => {
+    const outcome = handleParse(fixture);
+    if (!outcome.ok) throw new Error(outcome.message);
+    const patientName = outcome.nodes.find((n) => n.tag === "00100010");
+    expect(patientName?.name).toBe("Patient's Name");
+    expect(outcome.findings.find((f) => f.path === "00100010")?.name).toBe("Patient's Name");
+    expect(outcome.nodes.find((n) => n.tag === "00290010")).not.toHaveProperty("name");
+  });
+
   it("returns plain data that survives structured cloning", () => {
     const outcome = handleParse(fixture);
     expect(structuredClone(outcome)).toEqual(outcome);

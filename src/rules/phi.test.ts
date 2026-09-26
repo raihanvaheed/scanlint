@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { lookupAnnexE, matchAnnexEPattern } from "../model/annex-e";
+import { applyNames } from "../model/dictionary";
 import type { Finding, TagNode } from "../model/types";
 import { parseMetadata } from "../parse/walk";
 import { classify, classifyNode } from "./phi";
@@ -17,7 +18,7 @@ const manifest = JSON.parse(
 ) as Manifest;
 const { expectedFindings, expectedKept } = manifest.files[0];
 
-const findings = classify(parseMetadata(bytes));
+const findings = classify(applyNames(parseMetadata(bytes)));
 const byPath = new Map(findings.map((f) => [f.path, f]));
 
 const node = (tag: string, extra: Partial<TagNode> = {}): TagNode => ({
@@ -41,11 +42,13 @@ describe("the fixture manifest is the oracle", () => {
     expect(missing, `missing findings: ${missing.join(", ")}`).toEqual([]);
   });
 
-  it("matches every manifest entry on every field except keyword", () => {
+  // The manifest carries keywords; findings carry names. Neither is in the other, so both are left out.
+  it("matches every manifest entry on every field except keyword and name", () => {
     const wrong = expectedFindings.flatMap((entry) => {
       const expected = Object.fromEntries(Object.entries(entry).filter(([key]) => key !== "keyword"));
       const produced = byPath.get(entry.path);
-      if (produced && isDeepStrictEqual(produced, expected)) return [];
+      const comparable = produced && Object.fromEntries(Object.entries(produced).filter(([key]) => key !== "name"));
+      if (comparable && isDeepStrictEqual(comparable, expected)) return [];
       return [`${entry.path}\n  produced ${JSON.stringify(produced)}\n  expected ${JSON.stringify(expected)}`];
     });
     expect(wrong).toEqual([]);
@@ -64,6 +67,35 @@ describe("the fixture manifest is the oracle", () => {
   it("returns findings sorted by path, in the manifest's own order", () => {
     expect(producedPaths).toEqual([...producedPaths].sort());
     expect(producedPaths).toEqual(expectedPaths);
+  });
+});
+
+describe("names on findings", () => {
+  it("gives every standard finding a non-empty name", () => {
+    const standard = findings.filter((f) => f.kind !== "private");
+    expect(standard.length).toBe(26);
+    expect(standard.filter((f) => !f.name)).toEqual([]);
+  });
+
+  it("gives the three private findings no name key at all", () => {
+    const privates = findings.filter((f) => f.kind === "private");
+    expect(privates.length).toBe(3);
+    for (const finding of privates) expect(finding).not.toHaveProperty("name");
+  });
+
+  it("names the patient's name, and a nested element by its own tag", () => {
+    expect(byPath.get("00100010")?.name).toBe("Patient's Name");
+    expect(byPath.get("04000561/0/04000550/0/00080090")?.name).toBe("Referring Physician's Name");
+  });
+
+  it("copies the node's name, and leaves it off when the node has none", () => {
+    expect(classifyNode(node("00100010", { vr: "PN", name: "Patient's Name" }))?.name).toBe("Patient's Name");
+    expect(classifyNode(node("00100010", { vr: "PN" }))).not.toHaveProperty("name");
+  });
+
+  it("still finds 29 in total, and never sets keyword", () => {
+    expect(findings.length).toBe(29);
+    expect(findings.filter((f) => "keyword" in f)).toEqual([]);
   });
 });
 

@@ -9,6 +9,7 @@ export type TagNode = {
   path: TagPath;
   vr: string;
   keyword?: string;
+  name?: string;
   value?: string;
   items?: TagNode[][];
   lengthEncoding?: LengthEncoding;
@@ -18,6 +19,7 @@ export type Finding = {
   path: TagPath;
   tag: string;
   keyword?: string;
+  name?: string;
   vr: string;
   kind: FindingKind;
   action?: string;

@@ -1,3 +1,4 @@
+import { applyNames } from "../model/dictionary";
 import { classify } from "../rules/phi";
 import type { ParseOutcome } from "./protocol";
 import { parseMetadata } from "./walk";
@@ -14,7 +15,7 @@ export function toMessage(e: unknown): string {
 
 export function handleParse(bytes: Uint8Array): ParseOutcome {
   try {
-    const nodes = parseMetadata(bytes);
+    const nodes = applyNames(parseMetadata(bytes));
     return { ok: true, nodes, findings: classify(nodes) };
   } catch (e) {
     const message = toMessage(e);
