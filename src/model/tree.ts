@@ -1,4 +1,4 @@
-import type { TagNode } from "./types";
+import type { Finding, TagNode } from "./types";
 
 export function flattenNodes(nodes: TagNode[]): TagNode[] {
   const flat: TagNode[] = [];
@@ -9,4 +9,9 @@ export function flattenNodes(nodes: TagNode[]): TagNode[] {
     }
   }
   return flat;
+}
+
+/** The findings that count as identifying. The burned-in flag is a statement about the image, reported separately. */
+export function identifyingFindings(findings: Finding[]): Finding[] {
+  return findings.filter((finding) => finding.kind !== "burned-in");
 }

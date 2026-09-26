@@ -44,8 +44,8 @@ describe("lookupAttribute", () => {
 
   it("names a group length element, which the registry does not list", () => {
     expect(dictionary.attributes).not.toHaveProperty("00080000");
-    expect(lookupAttribute("00080000")).toEqual({ name: "Group Length" });
-    expect(lookupAttribute("7fe00000")).toEqual({ name: "Group Length" });
+    expect(lookupAttribute("00080000")).toEqual({ name: "Group Length", vr: "UL" });
+    expect(lookupAttribute("7fe00000")).toEqual({ name: "Group Length", vr: "UL" });
   });
 
   it("does not name a private tag, in any position", () => {

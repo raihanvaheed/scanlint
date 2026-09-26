@@ -93,6 +93,12 @@ describe("names on findings", () => {
     expect(classifyNode(node("00100010", { vr: "PN" }))).not.toHaveProperty("name");
   });
 
+  it("copies a binary node's length onto its finding, and leaves it off otherwise", () => {
+    expect(classifyNode(node("60003000", { vr: "OW", length: 2048 }))?.length).toBe(2048);
+    expect(classifyNode(node("60003000", { vr: "OW" }))).not.toHaveProperty("length");
+    expect(findings.filter((f) => "length" in f)).toEqual([]);
+  });
+
   it("still finds 29 in total, and never sets keyword", () => {
     expect(findings.length).toBe(29);
     expect(findings.filter((f) => "keyword" in f)).toEqual([]);

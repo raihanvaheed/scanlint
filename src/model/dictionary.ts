@@ -26,8 +26,8 @@ const patterns: { mask: string; attribute: Attribute }[] = dictionary.patterns.m
 });
 
 // Synthesised, not a table row: group length elements (gggg,0000) are a PS3.5 convention that
-// the registry does not list.
-const GROUP_LENGTH: Attribute = Object.freeze({ name: "Group Length" });
+// the registry does not list. Their VR is UL, which implicit-VR data needs in order to read them.
+const GROUP_LENGTH: Attribute = Object.freeze({ name: "Group Length", vr: "UL" });
 
 function maskMatches(tag: string, mask: string): boolean {
   for (let i = 0; i < 8; i++) {

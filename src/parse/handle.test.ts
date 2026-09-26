@@ -25,6 +25,15 @@ describe("handleParse on the fixture", () => {
     expect(outcome.nodes.find((n) => n.tag === "00290010")).not.toHaveProperty("name");
   });
 
+  it("carries the length of the two binary nodes, and no bytes", () => {
+    const outcome = handleParse(fixture);
+    if (!outcome.ok) throw new Error(outcome.message);
+    const flat = flattenNodes(outcome.nodes);
+    expect(flat.find((n) => n.path === "7fe00010")?.length).toBe(131072);
+    expect(flat.find((n) => n.path === "00020001")?.length).toBe(2);
+    expect(flat.filter((n) => "length" in n)).toHaveLength(2);
+  });
+
   it("returns plain data that survives structured cloning", () => {
     const outcome = handleParse(fixture);
     expect(structuredClone(outcome)).toEqual(outcome);

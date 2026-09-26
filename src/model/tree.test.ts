@@ -2,13 +2,30 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { parseMetadata } from "../parse/walk";
-import { flattenNodes } from "./tree";
+import { flattenNodes, identifyingFindings } from "./tree";
+import type { Finding } from "./types";
 
 const bytes = new Uint8Array(fs.readFileSync(path.resolve(__dirname, "../../public/samples/single.dcm")));
 const tree = parseMetadata(bytes);
 const flat = flattenNodes(tree);
 
 const NESTED_PATH = "04000561/0/04000550/0/00080090";
+
+describe("identifyingFindings", () => {
+  const finding = (kind: Finding["kind"], path: string): Finding => ({ path, tag: "00100010", vr: "LO", kind });
+
+  it("drops the burned-in flag and keeps the rest, in order", () => {
+    const all = [finding("annex-e", "a"), finding("burned-in", "b"), finding("private", "c")];
+    expect(identifyingFindings(all).map((f) => f.path)).toEqual(["a", "c"]);
+  });
+
+  it("does not modify its input, and returns an empty array for none", () => {
+    const all = [finding("burned-in", "b")];
+    identifyingFindings(all);
+    expect(all).toHaveLength(1);
+    expect(identifyingFindings([])).toEqual([]);
+  });
+});
 
 describe("flattenNodes", () => {
   it("returns more nodes than the top level, and contains every nested node", () => {

@@ -15,16 +15,17 @@ const nodes = [node("00081140", [[node("00100020")]]), node("00080060")];
 
 let counter = 0;
 const finding = (kind: Finding["kind"], value?: string): Finding => ({
-  path: `path-${counter++}`,
+  path: `${String(0x00100010 + counter++).padStart(8, "0")}`,
   tag: "00100010",
   vr: "LO",
   kind,
+  ...(kind === "annex-e" ? { action: "Z", name: `Field ${counter}` } : {}),
   ...(value === undefined ? {} : { value }),
 });
 
 function outcome(counts: { annex?: number; priv?: number; burned?: number }, burnedValue = "YES"): ParseOutcome {
   const findings = [
-    ...Array.from({ length: counts.annex ?? 0 }, () => finding("annex-e")),
+    ...Array.from({ length: counts.annex ?? 0 }, () => finding("annex-e", "SECRET")),
     ...Array.from({ length: counts.priv ?? 0 }, () => finding("private")),
     ...Array.from({ length: counts.burned ?? 0 }, () => finding("burned-in", burnedValue)),
   ];
@@ -74,13 +75,13 @@ describe("loading the sample", () => {
 
     await user.click(screen.getByRole("button", { name: "Load sample" }));
 
-    expect(await screen.findByText("3 elements read")).toBeTruthy();
+    expect(await screen.findByText("3 fields read")).toBeTruthy();
     expect(screen.getByText("5 could identify a patient")).toBeTruthy();
     expect(loadSample).toHaveBeenCalledTimes(1);
     expect(parse).toHaveBeenCalledTimes(1);
     expect(parse.mock.calls[0][0]).toBe(sampleBytes);
     expect(loadSample.mock.invocationCallOrder[0]).toBeLessThan(parse.mock.invocationCallOrder[0]);
-    expect(container.querySelector('[aria-live="polite"]')?.textContent).toContain("3 elements read");
+    expect(container.querySelector('[aria-live="polite"]')?.textContent).toContain("3 fields read");
   });
 });
 
@@ -90,10 +91,10 @@ describe("the breakdown", () => {
     await user.click(screen.getByRole("button", { name: "Load sample" }));
     await screen.findByText("28 could identify a patient");
 
-    const lines = screen.getAllByRole("listitem");
+    const lines = within(screen.getByText("private tags, contents defined by the manufacturer").closest("ul") as HTMLElement).getAllByRole("listitem");
     expect(lines).toHaveLength(2);
     expect(within(lines[0]).getByText("25")).toBeTruthy();
-    expect(within(lines[0]).getByText("flagged by the DICOM confidentiality profile")).toBeTruthy();
+    expect(within(lines[0]).getByText("named in the DICOM confidentiality profile")).toBeTruthy();
     expect(within(lines[1]).getByText("3")).toBeTruthy();
     expect(within(lines[1]).getByText("private tags, contents defined by the manufacturer")).toBeTruthy();
     expect(screen.queryByText(/burned-in annotation flag/)).toBeNull();
@@ -104,7 +105,8 @@ describe("the breakdown", () => {
     await user.click(screen.getByRole("button", { name: "Load sample" }));
     await screen.findByText("2 could identify a patient");
 
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    const breakdown = screen.getByText("named in the DICOM confidentiality profile").closest("ul") as HTMLElement;
+    expect(within(breakdown).getAllByRole("listitem")).toHaveLength(1);
     expect(screen.queryByText(/private tags/)).toBeNull();
   });
 });
@@ -123,7 +125,7 @@ describe("the burned-in annotation", () => {
     await user.click(screen.getByRole("button", { name: "Load sample" }));
     const statement = await screen.findByText("This file declares burned-in annotation: YES");
 
-    const list = screen.getByRole("list");
+    const list = screen.getByText("named in the DICOM confidentiality profile").closest("ul") as HTMLElement;
     const caveat = screen.getByText(CAVEAT);
     expect(list.compareDocumentPosition(statement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(statement.compareDocumentPosition(caveat) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -134,7 +136,8 @@ describe("the burned-in annotation", () => {
     await user.click(screen.getByRole("button", { name: "Load sample" }));
 
     expect(await screen.findByText("0 could identify a patient")).toBeTruthy();
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    expect(screen.queryByText("named in the DICOM confidentiality profile")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Findings (0)" })).toBeTruthy();
     expect(screen.getByText("This file declares burned-in annotation: NO")).toBeTruthy();
   });
 
@@ -152,6 +155,156 @@ describe("the burned-in annotation", () => {
 
     expect(screen.queryByText(/burned-in/)).toBeNull();
     expect(screen.queryByText(CAVEAT)).toBeNull();
+  });
+});
+
+describe("the wording", () => {
+  it("says fields, not elements, and names the profile rather than crediting it with flagging", async () => {
+    const { user } = setup(outcome({ annex: 2, priv: 1 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+
+    expect(await screen.findByText("3 fields read")).toBeTruthy();
+    expect(screen.getByText("named in the DICOM confidentiality profile")).toBeTruthy();
+    expect(screen.queryByText(/flagged by/)).toBeNull();
+    expect(screen.queryByText(/elements? read/)).toBeNull();
+  });
+
+  it("uses the singular for one field", async () => {
+    const { user } = setup({ ok: true, nodes: [node("00080060")], findings: [] });
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+
+    expect(await screen.findByText("1 field read")).toBeTruthy();
+  });
+
+  it("no longer says the field-by-field view is still to come", async () => {
+    const { user } = setup(outcome({ annex: 1 }));
+    expect(screen.queryByText(/next step/)).toBeNull();
+    expect(screen.queryByText(/Detailed field-by-field view/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("1 could identify a patient");
+    expect(screen.queryByText(/next step/)).toBeNull();
+  });
+});
+
+describe("the views", () => {
+  const listCount = () => Number(/\((\d+)\)/.exec(screen.getByRole("heading", { name: /^Findings \(/ }).textContent ?? "")?.[1]);
+  const headline = () => Number(/^(\d+) could identify/.exec(screen.getByText(/could identify a patient/).textContent ?? "")?.[1]);
+  const findingsRows = () => within(screen.getByRole("heading", { name: /^Findings \(/ }).closest("section") as HTMLElement).queryAllByRole("listitem");
+
+  it.each([
+    [{ annex: 3, priv: 2, burned: 1 }, 5],
+    [{ annex: 25, priv: 3, burned: 1 }, 28],
+    [{ burned: 1 }, 0],
+    [{}, 0],
+  ])("shows as many findings as the headline counts: %j", async (counts, expected) => {
+    const { user } = setup(outcome(counts));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText(/could identify a patient/);
+
+    expect(headline()).toBe(expected);
+    expect(listCount()).toBe(expected);
+    expect(findingsRows()).toHaveLength(expected);
+  });
+
+  it("lays out the summary, then the findings, then the collapsed tree, then Load another file", async () => {
+    const { user } = setup(outcome({ annex: 2, burned: 1 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    const fields = await screen.findByText("3 fields read");
+
+    const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const findings = screen.getByRole("heading", { name: "Findings (2)" });
+    const reveal = screen.getByRole("button", { name: "Reveal all" });
+    const tree = screen.getByRole("heading", { name: "All fields (3)" });
+    const another = screen.getByRole("button", { name: "Load another file" });
+
+    expect(follows(screen.getByRole("heading", { name: "single.dcm" }), fields)).toBe(true);
+    expect(follows(fields, screen.getByText(CAVEAT))).toBe(true);
+    expect(follows(screen.getByText(CAVEAT), findings)).toBe(true);
+    expect(follows(findings, reveal)).toBe(true);
+    expect(follows(reveal, tree)).toBe(true);
+    expect(follows(tree, another)).toBe(true);
+    expect((document.querySelector("section details") as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("keeps the findings and the tree out of the live region, apart from the announcement", async () => {
+    const { user, container } = setup(outcome({ annex: 2 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("2 could identify a patient");
+
+    const live = container.querySelector('[aria-live="polite"]') as HTMLElement;
+    expect(live.contains(screen.getByRole("heading", { name: "Findings (2)" }))).toBe(false);
+    expect(live.contains(screen.getByRole("heading", { name: "All fields (3)" }))).toBe(false);
+    expect(live.contains(screen.getByText("2 could identify a patient"))).toBe(true);
+  });
+
+  it("announces a reveal through the existing live region", async () => {
+    const { user, container } = setup(outcome({ annex: 2 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("2 could identify a patient");
+    const live = container.querySelector('[aria-live="polite"]') as HTMLElement;
+
+    await user.click(screen.getByRole("button", { name: "Reveal all" }));
+    expect(live.textContent).toContain("All values revealed");
+    await user.click(screen.getByRole("button", { name: "Hide all" }));
+    expect(live.textContent).toContain("All values hidden");
+    expect(live.textContent).not.toContain("SECRET");
+  });
+
+  it("gives the result heading a visible --signal ring while it holds programmatic focus", async () => {
+    const { user } = setup(outcome({ annex: 2 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("2 could identify a patient");
+
+    const heading = screen.getByRole("heading", { name: "single.dcm" });
+    expect(heading.getAttribute("tabindex")).toBe("-1");
+    expect(heading.className).toContain("focus:outline-signal");
+    expect(heading.className).toContain("focus:outline-2");
+    expect(heading.className).not.toContain("outline-none");
+  });
+
+  it("moves focus to the top of the result, not the button at the bottom", async () => {
+    const { user } = setup(outcome({ annex: 2 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("2 could identify a patient");
+
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "single.dcm" }));
+  });
+
+  it("resets every reveal to masked when the user returns to idle and loads again", async () => {
+    const { user } = setup(outcome({ annex: 2 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("2 could identify a patient");
+
+    await user.click(screen.getByRole("button", { name: "Reveal all" }));
+    expect(screen.getAllByText("SECRET")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Load another file" }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("2 could identify a patient");
+
+    expect(screen.queryByText("SECRET")).toBeNull();
+    expect(screen.getAllByRole("img", { name: "hidden value" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Reveal all" })).toBeTruthy();
+  });
+
+  it("resets a single row's reveal in the tree as well", async () => {
+    const patient: TagNode = { tag: "00100010", path: "00100010", vr: "PN", name: "Patient's Name", value: "SECRET" };
+    const flagged: Finding = { path: "00100010", tag: "00100010", vr: "PN", kind: "annex-e", action: "Z", name: "Patient's Name", value: "SECRET" };
+    const { user } = setup({ ok: true, nodes: [patient], findings: [flagged] });
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("1 could identify a patient");
+
+    const reveal = screen.getAllByRole("button", { name: "Reveal Patient's Name" });
+    expect(reveal).toHaveLength(2);
+    await user.click(reveal[1]);
+    expect(screen.getAllByText("SECRET")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Load another file" }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("1 could identify a patient");
+    expect(screen.queryByText("SECRET")).toBeNull();
+    expect(screen.getAllByRole("img", { name: "hidden value" })).toHaveLength(2);
   });
 });
 
