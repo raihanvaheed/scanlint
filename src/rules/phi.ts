@@ -1,7 +1,7 @@
 import { lookupAnnexE, matchAnnexEPattern } from "../model/annex-e";
 import { isPrivateTag } from "../model/tag";
 import type { Finding, FindingKind, TagNode } from "../model/types";
-import { flattenNodes } from "../parse/walk";
+import { flattenNodes } from "../model/tree";
 
 const BURNED_IN_ANNOTATION = "00280301";
 

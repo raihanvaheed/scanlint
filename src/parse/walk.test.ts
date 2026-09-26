@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { parseDicom } from "dicom-parser";
 import fs from "node:fs";
 import path from "node:path";
-import { flattenNodes, parseMetadata } from "./walk";
+import { flattenNodes } from "../model/tree";
+import { parseMetadata } from "./walk";
 import { tagGroup } from "../model/tag";
 import type { Finding, TagNode } from "../model/types";
 
@@ -143,37 +144,6 @@ describe("invalid input", () => {
 
   it.each(notDicom)("throws on %s", (_label, input) => {
     expect(() => parseMetadata(input)).toThrow();
-  });
-});
-
-describe("flattenNodes", () => {
-  it("returns more nodes than the top level, and contains every nested node", () => {
-    expect(flat.length).toBeGreaterThan(tree.length);
-    expect(flat.map((n) => n.path)).toEqual(expect.arrayContaining([NESTED_PATH, "04000561/0/04000550"]));
-  });
-
-  it("puts parents before their children", () => {
-    const order = new Map(flat.map((node, i) => [node.path, i]));
-    for (const node of flat) {
-      const slash = node.path.lastIndexOf("/");
-      if (slash === -1) continue;
-      const parentPath = node.path.slice(0, node.path.lastIndexOf("/", slash - 1));
-      expect(order.get(parentPath), `parent of ${node.path}`).toBeLessThan(order.get(node.path) ?? -1);
-    }
-  });
-
-  it("is depth-first: a node's descendants directly follow it", () => {
-    const outerAt = flat.findIndex((n) => n.path === "04000561");
-    expect(flat.slice(outerAt, outerAt + 3).map((n) => n.path)).toEqual([
-      "04000561",
-      "04000561/0/04000550",
-      NESTED_PATH,
-    ]);
-    expect(flat.filter((n) => n.path.startsWith("04000561/")).length).toBe(2);
-  });
-
-  it("returns an empty array for no nodes", () => {
-    expect(flattenNodes([])).toEqual([]);
   });
 });
 

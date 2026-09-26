@@ -14,13 +14,19 @@ const node = (tag: string, items?: TagNode[][]): TagNode => ({ tag, path: tag, v
 const nodes = [node("00081140", [[node("00100020")]]), node("00080060")];
 
 let counter = 0;
-const finding = (kind: Finding["kind"]): Finding => ({ path: `path-${counter++}`, tag: "00100010", vr: "LO", kind });
+const finding = (kind: Finding["kind"], value?: string): Finding => ({
+  path: `path-${counter++}`,
+  tag: "00100010",
+  vr: "LO",
+  kind,
+  ...(value === undefined ? {} : { value }),
+});
 
-function outcome(counts: { annex?: number; priv?: number; burned?: number }): ParseOutcome {
+function outcome(counts: { annex?: number; priv?: number; burned?: number }, burnedValue = "YES"): ParseOutcome {
   const findings = [
     ...Array.from({ length: counts.annex ?? 0 }, () => finding("annex-e")),
     ...Array.from({ length: counts.priv ?? 0 }, () => finding("private")),
-    ...Array.from({ length: counts.burned ?? 0 }, () => finding("burned-in")),
+    ...Array.from({ length: counts.burned ?? 0 }, () => finding("burned-in", burnedValue)),
   ];
   return { ok: true, nodes, findings };
 }
@@ -69,7 +75,7 @@ describe("loading the sample", () => {
     await user.click(screen.getByRole("button", { name: "Load sample" }));
 
     expect(await screen.findByText("3 elements read")).toBeTruthy();
-    expect(screen.getByText("6 could identify a patient")).toBeTruthy();
+    expect(screen.getByText("5 could identify a patient")).toBeTruthy();
     expect(loadSample).toHaveBeenCalledTimes(1);
     expect(parse).toHaveBeenCalledTimes(1);
     expect(parse.mock.calls[0][0]).toBe(sampleBytes);
@@ -79,30 +85,72 @@ describe("loading the sample", () => {
 });
 
 describe("the breakdown", () => {
-  it("shows one line per kind with the right count, and the burned-in caveat", async () => {
+  it("shows two lines with the right counts, and counts only those in the headline", async () => {
     const { user } = setup(outcome({ annex: 25, priv: 3, burned: 1 }));
     await user.click(screen.getByRole("button", { name: "Load sample" }));
-    await screen.findByText("29 could identify a patient");
+    await screen.findByText("28 could identify a patient");
 
     const lines = screen.getAllByRole("listitem");
-    expect(lines).toHaveLength(3);
+    expect(lines).toHaveLength(2);
     expect(within(lines[0]).getByText("25")).toBeTruthy();
     expect(within(lines[0]).getByText("flagged by the DICOM confidentiality profile")).toBeTruthy();
     expect(within(lines[1]).getByText("3")).toBeTruthy();
     expect(within(lines[1]).getByText("private tags, contents defined by the manufacturer")).toBeTruthy();
-    expect(within(lines[2]).getByText("1")).toBeTruthy();
-    expect(within(lines[2]).getByText("burned-in annotation flag")).toBeTruthy();
-    expect(within(lines[2]).getByText(CAVEAT)).toBeTruthy();
+    expect(screen.queryByText(/burned-in annotation flag/)).toBeNull();
   });
 
-  it("omits a kind whose count is zero, and shows no burned-in caveat without a burned-in finding", async () => {
-    const { user } = setup(outcome({ annex: 2, priv: 0, burned: 0 }));
+  it("omits a kind whose count is zero", async () => {
+    const { user } = setup(outcome({ annex: 2, priv: 0 }));
     await user.click(screen.getByRole("button", { name: "Load sample" }));
     await screen.findByText("2 could identify a patient");
 
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(screen.queryByText(/private tags/)).toBeNull();
-    expect(screen.queryByText("burned-in annotation flag")).toBeNull();
+  });
+});
+
+describe("the burned-in annotation", () => {
+  it.each(["YES", "NO", "MAYBE", "yes"])("reports what the file says, verbatim: %s", async (value) => {
+    const { user } = setup(outcome({ annex: 1, burned: 1 }, value));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+
+    expect(await screen.findByText(`This file declares burned-in annotation: ${value}`)).toBeTruthy();
+    expect(screen.getByText(CAVEAT)).toBeTruthy();
+  });
+
+  it("shows the statement below the breakdown, followed by the caveat", async () => {
+    const { user } = setup(outcome({ annex: 1, priv: 1, burned: 1 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    const statement = await screen.findByText("This file declares burned-in annotation: YES");
+
+    const list = screen.getByRole("list");
+    const caveat = screen.getByText(CAVEAT);
+    expect(list.compareDocumentPosition(statement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(statement.compareDocumentPosition(caveat) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("does not count the flag, even when it says NO", async () => {
+    const { user } = setup(outcome({ burned: 1 }, "NO"));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+
+    expect(await screen.findByText("0 could identify a patient")).toBeTruthy();
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    expect(screen.getByText("This file declares burned-in annotation: NO")).toBeTruthy();
+  });
+
+  it("shows (empty) when the file declares the element with no value", async () => {
+    const { user } = setup(outcome({ annex: 1, burned: 1 }, ""));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+
+    expect(await screen.findByText("This file declares burned-in annotation: (empty)")).toBeTruthy();
+  });
+
+  it("shows nothing about it, and no caveat, when the file has no burned-in finding", async () => {
+    const { user } = setup(outcome({ annex: 2, priv: 1 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("3 could identify a patient");
+
+    expect(screen.queryByText(/burned-in/)).toBeNull();
     expect(screen.queryByText(CAVEAT)).toBeNull();
   });
 });

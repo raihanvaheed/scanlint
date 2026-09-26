@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { handleParse, toMessage } from "./handle";
-import { flattenNodes } from "./walk";
+import { flattenNodes } from "../model/tree";
 
 const fixture = new Uint8Array(fs.readFileSync(path.resolve(__dirname, "../../public/samples/single.dcm")));
 
@@ -85,7 +85,6 @@ describe("the fallback message", () => {
       parseMetadata: () => {
         throw makeThrown();
       },
-      flattenNodes: () => [],
     }));
     const mocked = await import("./handle");
     expect(mocked.handleParse(fixture)).toEqual({ ok: false, message: "Could not read this file as DICOM." });

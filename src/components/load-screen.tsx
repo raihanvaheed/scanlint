@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
-import type { Finding, FindingKind, TagNode } from "../model/types";
+import { flattenNodes } from "../model/tree";
+import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
 
 type LoadScreenProps = {
@@ -10,7 +11,9 @@ type LoadScreenProps = {
   loadSample: () => Promise<ArrayBuffer>;
 };
 
-type Summary = { elements: number; findings: number; byKind: Record<FindingKind, number> };
+type Counted = "annex-e" | "private";
+
+type Summary = { elements: number; findings: number; byKind: Record<Counted, number>; burnedIn: string[] };
 
 type View =
   | { kind: "idle" }
@@ -20,23 +23,26 @@ type View =
 
 const SAMPLE_NAME = "single.dcm";
 
-const BREAKDOWN: { kind: FindingKind; label: string }[] = [
+const BREAKDOWN: { kind: Counted; label: string }[] = [
   { kind: "annex-e", label: "flagged by the DICOM confidentiality profile" },
   { kind: "private", label: "private tags, contents defined by the manufacturer" },
-  { kind: "burned-in", label: "burned-in annotation flag" },
 ];
+
+const BURNED_IN_CAVEAT = "ScanLint reports what this field says. It cannot see text printed into the image itself.";
 
 const FOCUS_RING = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal";
 const FOCUS_RING_WITHIN = "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-signal";
 
-function countNodes(nodes: TagNode[]): number {
-  return nodes.reduce((total, node) => total + 1 + (node.items ?? []).reduce((n, item) => n + countNodes(item), 0), 0);
-}
-
+// The burned-in flag is a statement about the image, not a field holding patient data, so it is
+// reported as the file's own claim and is not counted as identifying.
 function summarise(nodes: TagNode[], findings: Finding[]): Summary {
-  const byKind: Record<FindingKind, number> = { "annex-e": 0, private: 0, "burned-in": 0 };
-  for (const finding of findings) byKind[finding.kind] += 1;
-  return { elements: countNodes(nodes), findings: findings.length, byKind };
+  const byKind: Record<Counted, number> = { "annex-e": 0, private: 0 };
+  const burnedIn: string[] = [];
+  for (const finding of findings) {
+    if (finding.kind === "burned-in") burnedIn.push(finding.value ?? "");
+    else byKind[finding.kind] += 1;
+  }
+  return { elements: flattenNodes(nodes).length, findings: byKind["annex-e"] + byKind.private, byKind, burnedIn };
 }
 
 function messageOf(e: unknown): string {
@@ -175,21 +181,26 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
               <p className="mt-1 text-2xl font-semibold text-ink">
                 {`${view.summary.findings} could identify a patient`}
               </p>
-              <ul className="mt-6 space-y-3 text-ink">
-                {BREAKDOWN.filter(({ kind }) => view.summary.byKind[kind] > 0).map(({ kind, label }) => (
-                  <li key={kind}>
-                    <div className="flex gap-4">
+              {BREAKDOWN.some(({ kind }) => view.summary.byKind[kind] > 0) && (
+                <ul className="mt-6 space-y-3 text-ink">
+                  {BREAKDOWN.filter(({ kind }) => view.summary.byKind[kind] > 0).map(({ kind, label }) => (
+                    <li key={kind} className="flex gap-4">
                       <span className="w-8 shrink-0 text-right font-semibold tabular-nums">{view.summary.byKind[kind]}</span>
                       <span>{label}</span>
-                    </div>
-                    {kind === "burned-in" && (
-                      <p className="mt-1 pl-12 text-sm text-shade">
-                        ScanLint reports what this field says. It cannot see text printed into the image itself.
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {view.summary.burnedIn.length > 0 && (
+                <div className="mt-6">
+                  {view.summary.burnedIn.map((value, index) => (
+                    <p key={index} className="text-ink">
+                      {`This file declares burned-in annotation: ${value === "" ? "(empty)" : value}`}
+                    </p>
+                  ))}
+                  <p className="mt-1 text-sm text-shade">{BURNED_IN_CAVEAT}</p>
+                </div>
+              )}
             </div>
           )}
 
