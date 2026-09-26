@@ -3,7 +3,7 @@
     "edition": "2026d",
     "url": "https://dicom.nema.org/medical/dicom/current/source/docbook/part15/part15.xml",
     "table": "Table E.1-1",
-    "retrievedAt": "2026-09-25",
+    "retrievedAt": "2026-09-26",
     "attributeCount": 653,
     "patternCount": 4,
     "note": "The DocBook source is published only under /current/. An edition-pinned URL returns 404, so this file cannot be reproduced from the URL alone; edition and retrievedAt record which revision it came from."
