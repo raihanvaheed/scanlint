@@ -3,6 +3,7 @@ import { parseDicom } from "dicom-parser";
 import fs from "node:fs";
 import path from "node:path";
 import { flattenNodes, parseMetadata } from "./walk";
+import { tagGroup } from "../model/tag";
 import type { Finding, TagNode } from "../model/types";
 
 const ROOT = path.resolve(__dirname, "../..");
@@ -173,5 +174,84 @@ describe("flattenNodes", () => {
 
   it("returns an empty array for no nodes", () => {
     expect(flattenNodes([])).toEqual([]);
+  });
+});
+
+const ascii = (text: string): number[] => [...text].map((c) => c.charCodeAt(0));
+const u16 = (n: number): number[] => [n & 0xff, n >> 8];
+const u32 = (n: number): number[] => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
+const tagBytes = (group: number, element: number): number[] => [...u16(group), ...u16(element)];
+const UNDEFINED_LENGTH = 0xffffffff;
+
+const lo = (group: number, element: number, value: string): number[] => [
+  ...tagBytes(group, element), ...ascii("LO"), ...u16(value.length), ...ascii(value),
+];
+const undefinedLengthItem = (children: number[]): number[] => [
+  ...tagBytes(0xfffe, 0xe000), ...u32(UNDEFINED_LENGTH), ...children,
+  ...tagBytes(0xfffe, 0xe00d), ...u32(0),
+];
+const undefinedLengthSequence = (group: number, element: number, items: number[][]): number[] => [
+  ...tagBytes(group, element), ...ascii("SQ"), 0, 0, ...u32(UNDEFINED_LENGTH), ...items.flat(),
+  ...tagBytes(0xfffe, 0xe0dd), ...u32(0),
+];
+
+// Explicit VR little endian. Sequence 0008,1140 has two undefined-length items; item 0 holds
+// two elements and a nested sequence whose own item is undefined-length too.
+function undefinedLengthItemFile(): Uint8Array {
+  const transferSyntax = "1.2.840.10008.1.2.1\0";
+  const metaBody = [...tagBytes(2, 0x10), ...ascii("UI"), ...u16(transferSyntax.length), ...ascii(transferSyntax)];
+  const meta = [...tagBytes(2, 0), ...ascii("UL"), ...u16(4), ...u32(metaBody.length), ...metaBody];
+
+  const nested = undefinedLengthSequence(0x0008, 0x1115, [undefinedLengthItem(lo(0x10, 0x20, "ID03"))]);
+  const item0 = undefinedLengthItem([...lo(0x10, 0x20, "ID01"), ...lo(0x10, 0x1000, "ID02"), ...nested]);
+  const item1 = undefinedLengthItem(lo(0x10, 0x20, "ID04"));
+  const dataset = [
+    ...tagBytes(0x10, 0x10), ...ascii("PN"), ...u16(4), ...ascii("A^B "),
+    ...undefinedLengthSequence(0x0008, 0x1140, [item0, item1]),
+    ...tagBytes(0x08, 0x60), ...ascii("CS"), ...u16(2), ...ascii("MR"),
+  ];
+  return new Uint8Array([...new Array<number>(128).fill(0), ...ascii("DICM"), ...meta, ...dataset]);
+}
+
+describe("structural delimiters (group FFFE)", () => {
+  it("are absent from the fixture tree", () => {
+    expect(flat.filter((node) => tagGroup(node.tag) === 0xfffe)).toEqual([]);
+  });
+
+  it("are skipped inside undefined-length items at every depth, without shifting any path", () => {
+    const nodes = flattenNodes(parseMetadata(undefinedLengthItemFile()));
+
+    expect(nodes.map((n) => n.path)).toEqual([
+      "00100010",
+      "00081140",
+      "00081140/0/00100020",
+      "00081140/0/00101000",
+      "00081140/0/00081115",
+      "00081140/0/00081115/0/00100020",
+      "00081140/1/00100020",
+      "00080060",
+      "00020000",
+      "00020010",
+    ]);
+    expect(nodes.filter((n) => tagGroup(n.tag) === 0xfffe)).toEqual([]);
+    expect(nodes.filter((n) => n.path.includes("fffe"))).toEqual([]);
+
+    const values = Object.fromEntries(nodes.filter((n) => n.value !== undefined).map((n) => [n.path, n.value]));
+    expect(values["00081140/0/00100020"]).toBe("ID01");
+    expect(values["00081140/0/00101000"]).toBe("ID02");
+    expect(values["00081140/0/00081115/0/00100020"]).toBe("ID03");
+    expect(values["00081140/1/00100020"]).toBe("ID04");
+    expect(values["00080060"]).toBe("MR");
+  });
+
+  it("keeps the sequences' items and lengthEncoding intact", () => {
+    const nodes = flattenNodes(parseMetadata(undefinedLengthItemFile()));
+    const outer = nodes.find((n) => n.path === "00081140");
+    const inner = nodes.find((n) => n.path === "00081140/0/00081115");
+
+    expect(outer?.items?.map((item) => item.length)).toEqual([3, 1]);
+    expect(outer?.lengthEncoding).toBe("undefined");
+    expect(inner?.items?.map((item) => item.length)).toEqual([1]);
+    expect(inner?.lengthEncoding).toBe("undefined");
   });
 });

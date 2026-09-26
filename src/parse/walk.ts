@@ -1,6 +1,6 @@
 import { parseDicom } from "dicom-parser";
 import type { DataSet } from "dicom-parser";
-import { normalizeTag } from "../model/tag";
+import { normalizeTag, tagGroup } from "../model/tag";
 import type { TagNode } from "../model/types";
 
 const STRING_VRS = new Set([
@@ -12,6 +12,7 @@ function walkDataSet(dataSet: DataSet, prefix: string): TagNode[] {
 
   for (const [key, element] of Object.entries(dataSet.elements)) {
     const tag = normalizeTag(key);
+    if (tagGroup(tag) === 0xfffe) continue;
     const path = prefix === "" ? tag : `${prefix}/${tag}`;
     const vr = element.vr ?? "UN";
     const node: TagNode = { tag, path, vr };
