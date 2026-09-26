@@ -7,7 +7,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatTag } from "../model/tag";
 import type { Finding } from "../model/types";
 import { handleParse } from "../parse/handle";
-import { FindingsList } from "./findings-list";
+import { useReveal } from "./field-value";
+import { FindingsList as BareFindingsList } from "./findings-list";
+
+// The list no longer owns its reveal state: the screen does. This owns it for a list on its own.
+function FindingsList({ findings, announce }: { findings: Finding[]; announce?: (message: string) => void }) {
+  const reveal = useReveal(findings, announce);
+  return <BareFindingsList findings={findings} reveal={reveal} />;
+}
 
 afterEach(cleanup);
 

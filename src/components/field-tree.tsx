@@ -1,19 +1,20 @@
 "use client";
 
-import { useState } from "react";
 import type { ReactNode } from "react";
 import { formatTag } from "../model/tag";
 import { flattenNodes, identifyingFindings } from "../model/tree";
 import type { Finding, TagNode } from "../model/types";
 import { FieldValue } from "./field-value";
-import { FOCUS_RING } from "./focus";
+import type { Reveal } from "./field-value";
+import { FINDINGS_HEADING_ID, FOCUS_RING, HEADING_FOCUS_RING, TREE_HEADING_ID } from "./focus";
+import { SkipLink } from "./skip-link";
 
 type FieldTreeProps = {
   nodes: TagNode[];
   /** Every finding for the file. Rows matching an identifying finding by path are marked and masked. */
   findings: Finding[];
-  /** Called with a plain sentence when reveal state changes, for a live region. */
-  announce?: (message: string) => void;
+  /** Shared with the findings list, so a value revealed here is revealed there. Owned by the result. */
+  reveal: Reveal;
 };
 
 type Context = {
@@ -26,7 +27,6 @@ function itemCount(count: number): string {
   return `${count} item${count === 1 ? "" : "s"}`;
 }
 
-// A border is a shape as well as a colour, and the words are there for anyone who cannot see either.
 // The native marker is replaced by a glyph so a long name can wrap beside it instead of dropping below it.
 // It is still a <summary> inside a <details>: the browser keeps the toggling, the keys and the semantics.
 function Summary({ children }: { children: ReactNode }) {
@@ -40,23 +40,39 @@ function Summary({ children }: { children: ReactNode }) {
   );
 }
 
+// A border is a shape as well as a colour, and the words are there for anyone who cannot see either.
+// Only a finding has a border: in forced-colours mode a transparent one is drawn in the text colour,
+// which would put the bar on every row and stop it meaning anything. Both take the same width.
 function Mark({ flagged, children }: { flagged: boolean; children: ReactNode }) {
   return (
-    <span className={`block border-l-4 pl-3 ${flagged ? "border-signal" : "border-transparent"}`}>
+    <span data-finding={flagged} className={`block ${flagged ? "border-l-4 border-signal pl-3" : "pl-4"}`}>
       {flagged && <span className="sr-only">Finding: </span>}
       {children}
-      {flagged && <span className="ml-3 text-xs uppercase tracking-wide text-shade">finding</span>}
     </span>
   );
 }
 
-function Heading({ node }: { node: TagNode }) {
-  const tag = formatTag(node.tag);
+// The name, then the tag, the VR and, for a finding, the word: one line that wraps as a unit.
+function Heading({ label, node, flagged }: { label: string; node: TagNode; flagged: boolean }) {
   return (
     <>
-      <span className="break-words font-semibold text-ink">{node.name ?? tag}</span>
-      {node.name !== undefined && <span className="ml-3 font-mono text-sm text-shade">{tag}</span>}
+      <span className="break-words font-semibold text-ink">{label}</span>
+      {node.name !== undefined && (
+        <>
+          {" "}
+          <span className="ml-3 font-mono text-sm text-shade">{formatTag(node.tag)}</span>
+        </>
+      )}{" "}
       <span className="ml-3 font-mono text-sm text-shade">{node.vr}</span>
+      {flagged && (
+        <>
+          {" "}
+          {/* The sr-only "Finding:" before the row already says it. Read twice, it would be noise. */}
+          <span aria-hidden="true" className="ml-3 text-xs uppercase tracking-wide text-shade">
+            finding
+          </span>
+        </>
+      )}
     </>
   );
 }
@@ -82,9 +98,7 @@ function NodeRow({ node, ctx }: { node: TagNode; ctx: Context }) {
       <details className="group">
         <Summary>
           <Mark flagged={flagged}>
-            <span className="break-words font-semibold text-ink">{label}</span>
-            {node.name !== undefined && <span className="ml-3 font-mono text-sm text-shade">{formatTag(node.tag)}</span>}
-            <span className="ml-3 font-mono text-sm text-shade">{node.vr}</span>
+            <Heading label={label} node={node} flagged={flagged} />
           </Mark>
         </Summary>
         <ol className="mt-2 space-y-2 pl-4">
@@ -108,7 +122,7 @@ function NodeRow({ node, ctx }: { node: TagNode; ctx: Context }) {
   const name = node.name ?? formatTag(node.tag);
   return (
     <Mark flagged={flagged}>
-      <Heading node={node} />
+      <Heading label={name} node={node} flagged={flagged} />
       <div className="mt-1">
         <FieldValue
           name={name}
@@ -124,26 +138,20 @@ function NodeRow({ node, ctx }: { node: TagNode; ctx: Context }) {
   );
 }
 
-export function FieldTree({ nodes, findings, announce }: FieldTreeProps) {
-  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
+export function FieldTree({ nodes, findings, reveal }: FieldTreeProps) {
   const flagged = new Set(identifyingFindings(findings).map((finding) => finding.path));
-
-  function toggle(path: string, label: string) {
-    const next = new Set(revealed);
-    const showing = !next.delete(path);
-    if (showing) next.add(path);
-    setRevealed(next);
-    announce?.(`${label} ${showing ? "revealed" : "hidden"}`);
-  }
 
   return (
     <section className="mt-10 border-t-2 border-signal pt-5">
+      <SkipLink targetId={FINDINGS_HEADING_ID}>Back to findings</SkipLink>
       <details className="group">
         <Summary>
-          <h2 className="text-xl font-semibold text-ink">{`All fields (${flattenNodes(nodes).length})`}</h2>
+          <h2 id={TREE_HEADING_ID} tabIndex={-1} className={`text-xl font-semibold text-ink ${HEADING_FOCUS_RING}`}>
+            {`All fields (${flattenNodes(nodes).length})`}
+          </h2>
         </Summary>
         <div className="mt-4">
-          <NodeList nodes={nodes} ctx={{ flagged, revealed, toggle }} />
+          <NodeList nodes={nodes} ctx={{ flagged, revealed: reveal.revealed, toggle: reveal.toggle }} />
         </div>
       </details>
     </section>

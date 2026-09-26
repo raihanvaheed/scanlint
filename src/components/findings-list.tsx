@@ -1,18 +1,18 @@
 "use client";
 
-import { useState } from "react";
 import { ACTION_GLOSS } from "../model/actions";
 import { formatTag } from "../model/tag";
 import { identifyingFindings } from "../model/tree";
 import type { Finding } from "../model/types";
-import { FieldValue, isMaskable } from "./field-value";
-import { FOCUS_RING } from "./focus";
+import { FieldValue } from "./field-value";
+import type { Reveal } from "./field-value";
+import { FINDINGS_HEADING_ID, FOCUS_RING, HEADING_FOCUS_RING } from "./focus";
 
 type FindingsListProps = {
   /** Every finding for the file. The burned-in flag is dropped here: the summary already states it. */
   findings: Finding[];
-  /** Called with a plain sentence when reveal state changes, for a live region. */
-  announce?: (message: string) => void;
+  /** Shared with the tree, so a value revealed here is revealed there. Owned by the result. */
+  reveal: Reveal;
 };
 
 const PRIVATE_REASON = "private tag, contents defined by the manufacturer";
@@ -30,39 +30,25 @@ function Reason({ finding }: { finding: Finding }) {
   );
 }
 
-export function FindingsList({ findings, announce }: FindingsListProps) {
+export function FindingsList({ findings, reveal }: FindingsListProps) {
   const rows = identifyingFindings(findings);
-  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
-
-  const maskable = rows.filter(isMaskable).map((finding) => finding.path);
-  const allRevealed = maskable.length > 0 && maskable.every((path) => revealed.has(path));
-
-  function toggleAll() {
-    setRevealed(allRevealed ? new Set() : new Set(maskable));
-    announce?.(allRevealed ? "All values hidden" : "All values revealed");
-  }
-
-  function toggle(finding: Finding, label: string) {
-    const next = new Set(revealed);
-    const showing = !next.delete(finding.path);
-    if (showing) next.add(finding.path);
-    setRevealed(next);
-    announce?.(`${label} ${showing ? "revealed" : "hidden"}`);
-  }
+  const { revealed, hasMaskable, allRevealed, toggle, toggleAll } = reveal;
 
   return (
     <section className="mt-10 border-t-2 border-signal pt-5">
-      <h2 className="text-xl font-semibold text-ink">{`Findings (${rows.length})`}</h2>
+      <h2 id={FINDINGS_HEADING_ID} tabIndex={-1} className={`text-xl font-semibold text-ink ${HEADING_FOCUS_RING}`}>
+        {`Findings (${rows.length})`}
+      </h2>
 
       {rows.length === 0 ? (
         <p className="mt-3 text-shade">No fields were flagged.</p>
       ) : (
         <>
-          {maskable.length > 0 && (
+          {hasMaskable && (
             <button
               type="button"
               onClick={toggleAll}
-              className={`mt-3 cursor-pointer rounded-md border-2 border-rule px-4 py-1.5 text-ink hover:border-signal ${FOCUS_RING}`}
+              className={`mt-3 cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-ink hover:border-signal ${FOCUS_RING}`}
             >
               {allRevealed ? "Hide all" : "Reveal all"}
             </button>
@@ -86,7 +72,7 @@ export function FindingsList({ findings, announce }: FindingsListProps) {
                       length={finding.length}
                       flagged
                       revealed={revealed.has(finding.path)}
-                      onToggle={() => toggle(finding, label)}
+                      onToggle={() => toggle(finding.path, label)}
                     />
                   </p>
                   <p className="mt-1 text-sm">

@@ -326,13 +326,50 @@ describe("numeric values", () => {
     expect(read(list(30))("00090003")?.value).toBe(`${sixteen} … (30 values in all)`);
   });
 
-  it("does not reformat a float: it is JavaScript's own conversion of what the file holds", () => {
-    // 0.1 is not representable in 32 bits. The stored value is what is shown.
-    const node = read(shortVr(0x0009, 0x0004, "FL", f32(0.1)))("00090004");
-    expect(node?.value).toBe(String(Math.fround(0.1)));
-    expect(node?.value).toBe("0.10000000149011612");
-    expect(read(shortVr(0x0009, 0x0005, "FD", f64(0.1)))("00090005")?.value).toBe("0.1");
-    expect(read(shortVr(0x0009, 0x0006, "FL", f32(1e21)))("00090006")?.value).toBe(String(Math.fround(1e21)));
+  describe("a 32-bit float is written with the fewest digits that name the same float", () => {
+    const fl = (n: number) => read(shortVr(0x0009, 0x0004, "FL", f32(n)))("00090004")?.value;
+
+    it("shows the float32 nearest 0.1 as 0.1, not 0.10000000149011612", () => {
+      expect(fl(0.1)).toBe("0.1");
+      expect(fl(0.5)).toBe("0.5");
+      expect(fl(-2.5)).toBe("-2.5");
+    });
+
+    it("keeps every digit a value needs", () => {
+      // The float32 nearest 0.11708920449018478 needs nine significant digits.
+      expect(fl(0.11708920449018478)).toBe("0.117089204");
+      expect(fl(15.28294849395752)).toBe("15.2829485");
+      expect(fl(3.4028234663852886e38)).toBe("3.4028235e+38");
+    });
+
+    it("round-trips zero, a negative, and large and small exponents", () => {
+      for (const n of [0, -1.5, -0.001, 1e21, -1e21, 1e-45, 3.4028234663852886e38, 16777216, 123456.789]) {
+        const shown = fl(n);
+        expect(Math.fround(Number(shown)), String(n)).toBe(Math.fround(n));
+      }
+      expect(fl(0)).toBe("0");
+      expect(fl(1e21)).toBe("1e+21");
+      expect(fl(1e-45)).toBe("1e-45");
+    });
+
+    it("is never longer than the float's own default conversion, and never a different float", () => {
+      for (let i = 0; i < 500; i++) {
+        const n = Math.fround((i - 250) * 0.37 + i / 7);
+        const shown = fl(n) as string;
+        expect(shown.length, String(n)).toBeLessThanOrEqual(String(n).length);
+        expect(Math.fround(Number(shown)), String(n)).toBe(n);
+      }
+    });
+
+    it("leaves a 64-bit float alone: JavaScript's own conversion is already the shortest", () => {
+      expect(read(shortVr(0x0009, 0x0005, "FD", f64(0.1)))("00090005")?.value).toBe("0.1");
+      expect(read(shortVr(0x0009, 0x0005, "FD", f64(1 / 3)))("00090005")?.value).toBe(String(1 / 3));
+    });
+
+    it("keeps NaN and infinity readable", () => {
+      expect(fl(NaN)).toBe("NaN");
+      expect(fl(Infinity)).toBe("Infinity");
+    });
   });
 
   it("gives a zero-length numeric element an empty value, as a string VR gets", () => {
