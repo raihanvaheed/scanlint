@@ -39,14 +39,3 @@ export function parseMetadata(bytes: Uint8Array): TagNode[] {
   const dataSet = parseDicom(bytes, { untilTag: "x7fe00010" });
   return walkDataSet(dataSet, "");
 }
-
-export function flattenNodes(nodes: TagNode[]): TagNode[] {
-  const flat: TagNode[] = [];
-  for (const node of nodes) {
-    flat.push(node);
-    for (const item of node.items ?? []) {
-      flat.push(...flattenNodes(item));
-    }
-  }
-  return flat;
-}
