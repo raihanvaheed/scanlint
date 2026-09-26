@@ -11,6 +11,7 @@ export type TagNode = {
   keyword?: string;
   name?: string;
   value?: string;
+  length?: number;
   items?: TagNode[][];
   lengthEncoding?: LengthEncoding;
 };
@@ -24,5 +25,6 @@ export type Finding = {
   kind: FindingKind;
   action?: string;
   value?: string;
+  length?: number;
   lengthEncoding?: LengthEncoding;
 };

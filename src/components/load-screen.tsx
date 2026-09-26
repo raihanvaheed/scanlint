@@ -5,6 +5,9 @@ import type { ChangeEvent, DragEvent } from "react";
 import { flattenNodes } from "../model/tree";
 import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
+import { FieldTree } from "./field-tree";
+import { FindingsList } from "./findings-list";
+import { FOCUS_RING, FOCUS_RING_WITHIN } from "./focus";
 
 type LoadScreenProps = {
   parse: (bytes: ArrayBuffer) => Promise<ParseOutcome>;
@@ -13,25 +16,22 @@ type LoadScreenProps = {
 
 type Counted = "annex-e" | "private";
 
-type Summary = { elements: number; findings: number; byKind: Record<Counted, number>; burnedIn: string[] };
+type Summary = { fields: number; findings: number; byKind: Record<Counted, number>; burnedIn: string[] };
 
 type View =
   | { kind: "idle" }
   | { kind: "loading"; name: string }
-  | { kind: "loaded"; name: string; summary: Summary }
+  | { kind: "loaded"; name: string; summary: Summary; nodes: TagNode[]; findings: Finding[] }
   | { kind: "error"; headline: string; detail: string };
 
 const SAMPLE_NAME = "single.dcm";
 
 const BREAKDOWN: { kind: Counted; label: string }[] = [
-  { kind: "annex-e", label: "flagged by the DICOM confidentiality profile" },
+  { kind: "annex-e", label: "named in the DICOM confidentiality profile" },
   { kind: "private", label: "private tags, contents defined by the manufacturer" },
 ];
 
 const BURNED_IN_CAVEAT = "ScanLint reports what this field says. It cannot see text printed into the image itself.";
-
-const FOCUS_RING = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal";
-const FOCUS_RING_WITHIN = "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-signal";
 
 // The burned-in flag is a statement about the image, not a field holding patient data, so it is
 // reported as the file's own claim and is not counted as identifying.
@@ -42,7 +42,7 @@ function summarise(nodes: TagNode[], findings: Finding[]): Summary {
     if (finding.kind === "burned-in") burnedIn.push(finding.value ?? "");
     else byKind[finding.kind] += 1;
   }
-  return { elements: flattenNodes(nodes).length, findings: byKind["annex-e"] + byKind.private, byKind, burnedIn };
+  return { fields: flattenNodes(nodes).length, findings: byKind["annex-e"] + byKind.private, byKind, burnedIn };
 }
 
 function messageOf(e: unknown): string {
@@ -55,18 +55,23 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
   const dragDepth = useRef(0);
   const sampleButton = useRef<HTMLButtonElement>(null);
   const anotherButton = useRef<HTMLButtonElement>(null);
+  const resultHeading = useRef<HTMLHeadingElement>(null);
+  const [announcement, setAnnouncement] = useState("");
   const previousKind = useRef(view.kind);
 
   useEffect(() => {
     if (previousKind.current !== view.kind) {
       if (view.kind === "idle") sampleButton.current?.focus();
-      if (view.kind === "loaded" || view.kind === "error") anotherButton.current?.focus();
+      // The result is long, so focus goes to its top. The button is at the bottom, after every row.
+      if (view.kind === "loaded") resultHeading.current?.focus();
+      if (view.kind === "error") anotherButton.current?.focus();
     }
     previousKind.current = view.kind;
   }, [view.kind]);
 
   // The buffer is transferred to the worker by `parse` and must not be used afterwards.
   async function analyse(name: string, readBytes: () => Promise<ArrayBuffer>, readFailure: string) {
+    setAnnouncement("");
     setView({ kind: "loading", name });
 
     let bytes: ArrayBuffer;
@@ -81,7 +86,13 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
       const outcome = await parse(bytes);
       setView(
         outcome.ok
-          ? { kind: "loaded", name, summary: summarise(outcome.nodes, outcome.findings) }
+          ? {
+              kind: "loaded",
+              name,
+              summary: summarise(outcome.nodes, outcome.findings),
+              nodes: outcome.nodes,
+              findings: outcome.findings,
+            }
           : { kind: "error", headline: "This file could not be read as DICOM.", detail: outcome.message },
       );
     } catch (e) {
@@ -128,9 +139,6 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
         <h1 className="text-[2.5rem] font-bold text-ink">ScanLint</h1>
         <div className="mt-3 h-0.75 w-16 bg-signal" />
         <p className="mt-5 text-xl text-ink">Find identifying information hidden in medical image files.</p>
-        <p className="mt-3 text-sm text-shade">
-          Detailed field-by-field view arrives in the next step. For now this reports what a file contains.
-        </p>
       </header>
 
       <div className="mt-10">
@@ -174,9 +182,11 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
 
           {view.kind === "loaded" && (
             <div>
-              <h2 className="break-all text-lg font-semibold text-ink">{view.name}</h2>
+              <h2 ref={resultHeading} tabIndex={-1} className="break-all rounded text-lg font-semibold text-ink focus:outline-2 focus:outline-offset-4 focus:outline-signal">
+                {view.name}
+              </h2>
               <p className="mt-4 text-2xl font-semibold text-ink">
-                {`${view.summary.elements} element${view.summary.elements === 1 ? "" : "s"} read`}
+                {`${view.summary.fields} field${view.summary.fields === 1 ? "" : "s"} read`}
               </p>
               <p className="mt-1 text-2xl font-semibold text-ink">
                 {`${view.summary.findings} could identify a patient`}
@@ -201,6 +211,7 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
                   <p className="mt-1 text-sm text-shade">{BURNED_IN_CAVEAT}</p>
                 </div>
               )}
+              <p className="sr-only">{announcement}</p>
             </div>
           )}
 
@@ -211,6 +222,13 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
             </div>
           )}
         </div>
+
+        {view.kind === "loaded" && (
+          <>
+            <FindingsList findings={view.findings} announce={setAnnouncement} />
+            <FieldTree nodes={view.nodes} findings={view.findings} announce={setAnnouncement} />
+          </>
+        )}
 
         {(view.kind === "loaded" || view.kind === "error") && (
           <button

@@ -4,6 +4,12 @@
 Writes, relative to the repository root:
   public/samples/single.dcm            a synthetic single-slice MR Image Storage file
   fixtures/single.manifest.json        exactly what was planted in it (the test oracle)
+  fixtures/single-implicit.dcm         the same study, Implicit VR Little Endian
+  fixtures/single-rle.dcm              the same study, RLE Lossless pixel data (undefined length)
+
+The two variants are test data, not samples offered to a visitor, so they live in fixtures/.
+They are built from the same PLANTED list, and each is checked against the explicit file
+before the script finishes. The manifest describes the explicit file only.
 
 Everything the file contains comes from ONE declarative list, PLANTED, below. The
 same list writes the dataset and produces the manifest, so the two cannot drift.
@@ -35,6 +41,7 @@ from pydicom.datadict import dictionary_VR, keyword_for_tag, tag_for_keyword
 from pydicom.multival import MultiValue
 from pydicom.sequence import Sequence
 from pydicom.tag import BaseTag, Tag
+from pydicom.uid import RLELossless
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DCM_REL = "public/samples/single.dcm"
@@ -76,6 +83,12 @@ PATH_FORMAT = (
 )
 
 Segment = Union[str, int]
+
+# Variants of the same study. Only the transfer syntax (and, for RLE, the pixel data) differs.
+IMPLICIT_VR_LITTLE_ENDIAN = "1.2.840.10008.1.2"
+RLE_LOSSLESS = "1.2.840.10008.1.2.5"
+IMPLICIT_REL = "fixtures/single-implicit.dcm"
+RLE_REL = "fixtures/single-rle.dcm"
 
 
 @dataclass(frozen=True)
@@ -278,7 +291,7 @@ def make_phantom() -> np.ndarray:
     return image.astype("<u2")
 
 
-def build_dataset() -> Tuple[Dataset, List[Placed]]:
+def build_dataset(transfer_syntax: str = EXPLICIT_VR_LITTLE_ENDIAN) -> Tuple[Dataset, List[Placed]]:
     ds = Dataset()
     meta = FileMetaDataset()
     placed: List[Placed] = []
@@ -290,8 +303,14 @@ def build_dataset() -> Tuple[Dataset, List[Placed]]:
     ds.file_meta = meta
     ds.preamble = b"\x00" * 128
     ds.is_little_endian = True
-    ds.is_implicit_VR = False
+    ds.is_implicit_VR = transfer_syntax == IMPLICIT_VR_LITTLE_ENDIAN
     ds.add(DataElement(Tag(0x7FE00010), "OW", make_phantom().tobytes()))
+    if transfer_syntax == IMPLICIT_VR_LITTLE_ENDIAN:
+        meta.TransferSyntaxUID = IMPLICIT_VR_LITTLE_ENDIAN
+    elif transfer_syntax == RLE_LOSSLESS:
+        ds.compress(RLELossless)  # sets the transfer syntax, and writes Pixel Data as OB, undefined length
+    elif transfer_syntax != EXPLICIT_VR_LITTLE_ENDIAN:
+        raise SystemExit(f"Unsupported transfer syntax: {transfer_syntax}")
     return ds, placed
 
 
@@ -411,6 +430,75 @@ def verify_length_encoding(dcm_path: Path, findings: List[dict]) -> None:
         print(f"  sequence delimitation item (FFFE,E0DD) at offset {offset}: {data[offset:offset + 8].hex(' ')}")
 
 
+def _plain(value: Any) -> Any:
+    """A value in a form that compares equal however the transfer syntax typed it."""
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("ascii").rstrip(" \x00")
+    if isinstance(value, (list, tuple, MultiValue)):
+        return [str(v) for v in value]
+    return str(value)
+
+
+def _flatten(ds: Dataset, prefix: List[Segment]) -> Dict[str, Any]:
+    """Every element except Pixel Data, by canonical path. Sequences record their item count."""
+    out: Dict[str, Any] = {}
+    for elem in ds:
+        if elem.tag == Tag(0x7FE00010):
+            continue
+        here = prefix + [elem.tag]
+        if elem.VR == "SQ":
+            out[_path_string(here)] = f"SQ with {len(elem.value)} item(s)"
+            for index, sub in enumerate(elem.value):
+                out.update(_flatten(sub, here + [index]))
+        else:
+            out[_path_string(here)] = _plain(elem.value)
+    return out
+
+
+def verify_variant(path: Path, reference: Path, transfer_syntax: str, phantom: bytes) -> None:
+    """The variant must say the same thing as the explicit file, in its own encoding."""
+    ref = pydicom.dcmread(str(reference))
+    got = pydicom.dcmread(str(path))
+    if str(got.file_meta.TransferSyntaxUID) != transfer_syntax:
+        raise SystemExit(f"{path.name}: transfer syntax {got.file_meta.TransferSyntaxUID}, expected {transfer_syntax}")
+
+    want = _flatten(ref, [])
+    want.update(_flatten(ref.file_meta, []))
+    have = _flatten(got, [])
+    have.update(_flatten(got.file_meta, []))
+    # The transfer syntax must differ, and the group length follows the length of its UID.
+    for tag in (Tag(0x00020000), Tag(0x00020010)):
+        want.pop(_path_string([tag]))
+        have.pop(_path_string([tag]))
+    if want != have:
+        diff = sorted(k for k in set(want) | set(have) if want.get(k) != have.get(k))
+        raise SystemExit(f"{path.name}: elements differ from the explicit file: {diff}")
+
+    data = path.read_bytes()
+    if transfer_syntax == IMPLICIT_VR_LITTLE_ENDIAN:
+        # No VR in the stream: tag, then a 4-byte length, then the value.
+        name = b"TESTPATIENT^SCANLINT"
+        wanted = struct.pack("<HHI", 0x0010, 0x0010, len(name)) + name
+        if data.count(wanted) != 1:
+            raise SystemExit(f"{path.name}: Patient's Name is not encoded as an implicit-VR element")
+        if got.PixelData != ref.PixelData:
+            raise SystemExit(f"{path.name}: pixel data differs from the explicit file")
+        print(f"  {path.name}: Patient's Name as tag + 4-byte length: {wanted[:12].hex(' ')} ...")
+    else:
+        # The standard says OB for encapsulated pixel data; pydicom 2.4.4 writes OW. Either is
+        # read the same way, so accept both and print which one this file holds.
+        candidates = [
+            struct.pack("<HH", 0x7FE0, 0x0010) + vr + b"\x00\x00\xff\xff\xff\xff" for vr in (b"OB", b"OW")
+        ]
+        found = [(header, data.find(header)) for header in candidates if data.count(header) == 1]
+        if len(found) != 1:
+            raise SystemExit(f"{path.name}: Pixel Data is not an element of undefined length")
+        header, at = found[0]
+        if got.pixel_array.astype("<u2").tobytes() != phantom:
+            raise SystemExit(f"{path.name}: RLE pixel data does not decode to the planted image")
+        print(f"  {path.name}: Pixel Data header at offset {at}: {data[at:at + 12].hex(' ')}")
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -449,6 +537,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     manifest_path.write_bytes((json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
     print(f"wrote {dcm_path} ({dcm_path.stat().st_size} bytes, sha256 {sha256})")
     print(f"wrote {manifest_path} ({len(findings)} findings, {len(kept_entries)} kept)")
+
+    phantom = make_phantom().tobytes()
+    print("variants (checked against the explicit file):")
+    for rel, syntax in ((IMPLICIT_REL, IMPLICIT_VR_LITTLE_ENDIAN), (RLE_REL, RLE_LOSSLESS)):
+        variant_path = root / rel
+        variant_path.parent.mkdir(parents=True, exist_ok=True)
+        variant_ds, _ = build_dataset(syntax)
+        variant_ds.save_as(str(variant_path), write_like_original=False)
+        verify_variant(variant_path, dcm_path, syntax, phantom)
+        digest = hashlib.sha256(variant_path.read_bytes()).hexdigest()
+        print(f"wrote {variant_path} ({variant_path.stat().st_size} bytes, sha256 {digest})")
 
 
 if __name__ == "__main__":

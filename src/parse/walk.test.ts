@@ -183,6 +183,250 @@ function undefinedLengthItemFile(): Uint8Array {
   return new Uint8Array([...new Array<number>(128).fill(0), ...ascii("DICM"), ...meta, ...dataset]);
 }
 
+function part10(dataset: number[]): Uint8Array {
+  const transferSyntax = "1.2.840.10008.1.2.1\0";
+  const metaBody = [...tagBytes(2, 0x10), ...ascii("UI"), ...u16(transferSyntax.length), ...ascii(transferSyntax)];
+  const meta = [...tagBytes(2, 0), ...ascii("UL"), ...u16(4), ...u32(metaBody.length), ...metaBody];
+  return new Uint8Array([...new Array<number>(128).fill(0), ...ascii("DICM"), ...meta, ...dataset]);
+}
+
+const longVr = (group: number, element: number, vr: string, length: number, body: number[]): number[] => [
+  ...tagBytes(group, element), ...ascii(vr), 0, 0, ...u32(length), ...body,
+];
+
+// Pixel data encoded with undefined length, as compressed images are. The parser stops at its header.
+function encapsulatedPixelDataFile(vr: string): Uint8Array {
+  return part10([
+    ...tagBytes(0x08, 0x60), ...ascii("CS"), ...u16(2), ...ascii("MR"),
+    ...longVr(0x7fe0, 0x10, vr, UNDEFINED_LENGTH, []),
+  ]);
+}
+
+// An item holding a private OB of six bytes, a private OB of none, and a string.
+function binaryInItemFile(): Uint8Array {
+  const item = [
+    ...longVr(0x29, 0x1001, "OB", 6, [1, 2, 3, 4, 5, 6]),
+    ...longVr(0x29, 0x1002, "OB", 0, []),
+    ...lo(0x10, 0x20, "ID01"),
+  ];
+  const sequence = [...tagBytes(0x08, 0x1140), ...ascii("SQ"), 0, 0, ...u32(item.length + 8), ...tagBytes(0xfffe, 0xe000), ...u32(item.length), ...item];
+  return part10(sequence);
+}
+
+const BINARY = ["OB", "OW", "OF", "OD", "OL", "OV", "UN"];
+
+describe("length of binary elements", () => {
+  const binaryNodes = flat.filter((n) => BINARY.includes(n.vr));
+
+  it("is carried by both binary nodes in the fixture, as the true byte count", () => {
+    expect(binaryNodes.map((n) => n.path).sort()).toEqual(["00020001", "7fe00010"]);
+    expect(byPath.get("00020001")?.length).toBe(2);
+
+    // The pixel data element's header is read, then parsing stops, so its length is the header's own.
+    const { dataOffset, length } = parseDicom(bytes, { untilTag: "x7fe00010" }).elements.x7fe00010;
+    expect(byPath.get("7fe00010")?.length).toBe(length);
+    expect(byPath.get("7fe00010")?.length).toBe(bytes.length - dataOffset);
+    expect(byPath.get("7fe00010")?.length).toBe(131072);
+  });
+
+  it("never carries any byte data: a binary node holds a number and nothing else", () => {
+    for (const node of binaryNodes) {
+      expect(typeof node.length, node.path).toBe("number");
+      expect(node.value, node.path).toBeUndefined();
+      expect(Object.keys(node).sort(), node.path).toEqual(["length", "path", "tag", "vr"]);
+    }
+    expect(JSON.stringify(tree)).not.toMatch(/"(bytes|data|buffer)"/);
+  });
+
+  it("is absent from every node that is not binary: it is not a general field", () => {
+    const others = flat.filter((n) => !BINARY.includes(n.vr));
+    expect(others.length).toBeGreaterThan(40);
+    expect(others.filter((n) => "length" in n).map((n) => n.path)).toEqual([]);
+  });
+
+  it("leaves length unset, not 4294967295, for an undefined-length element such as encapsulated pixel data", () => {
+    const nodes = parseMetadata(encapsulatedPixelDataFile("OB"));
+    const pixel = nodes.find((n) => n.tag === "7fe00010");
+
+    expect(pixel?.vr).toBe("OB");
+    expect(pixel).not.toHaveProperty("length");
+    expect(JSON.stringify(nodes)).not.toContain("4294967295");
+  });
+
+  it("keeps a real length of zero, and a defined length inside an item", () => {
+    const nodes = flattenNodes(parseMetadata(binaryInItemFile()));
+    const byPathHere = new Map(nodes.map((n) => [n.path, n]));
+
+    expect(byPathHere.get("00081140/0/00291001")?.length).toBe(6);
+    expect(byPathHere.get("00081140/0/00291002")?.length).toBe(0);
+    expect(byPathHere.get("00081140/0/00291002")).toHaveProperty("length", 0);
+    expect(byPathHere.get("00081140/0/00100020")).not.toHaveProperty("length");
+  });
+});
+
+const f32 = (n: number): number[] => [...new Uint8Array(new Float32Array([n]).buffer)];
+const f64 = (n: number): number[] => [...new Uint8Array(new Float64Array([n]).buffer)];
+const i16 = (n: number): number[] => [...new Uint8Array(new Int16Array([n]).buffer)];
+const i32 = (n: number): number[] => [...new Uint8Array(new Int32Array([n]).buffer)];
+const shortVr = (group: number, element: number, vr: string, body: number[]): number[] => [
+  ...tagBytes(group, element), ...ascii(vr), ...u16(body.length), ...body,
+];
+
+describe("numeric values", () => {
+  const read = (...elements: number[][]) => {
+    const nodes = flattenNodes(parseMetadata(part10(elements.flat())));
+    return (tag: string) => nodes.find((n) => n.tag === tag);
+  };
+
+  it("reads each numeric VR from the fixture where it exists", () => {
+    expect(byPath.get("00280010")?.value).toBe("256"); // US
+    expect(byPath.get("00280100")?.value).toBe("16"); // US
+    expect(byPath.get("00020000")?.value).toBe("198"); // UL: the file meta group length
+    expect(byPath.get("00280002")?.value).toBe("1");
+    expect(byPath.get("00280103")?.value).toBe("0");
+  });
+
+  it.each([
+    ["US", u16(65535), "65535"],
+    ["SS", i16(-2), "-2"],
+    ["UL", u32(4000000000), "4000000000"],
+    ["SL", i32(-100000), "-100000"],
+    ["FL", f32(0.5), "0.5"],
+    ["FD", f64(1.25), "1.25"],
+  ])("reads %s from a constructed element", (vr, body, expected) => {
+    const node = read(shortVr(0x0009, 0x0000, vr, body))("00090000");
+    expect(node?.vr).toBe(vr);
+    expect(node?.value).toBe(expected);
+  });
+
+  it("reads an attribute tag as a formatted tag", () => {
+    const node = read(shortVr(0x0009, 0x0001, "AT", [...u16(0x0010), ...u16(0x0010)]))("00090001");
+    expect(node?.value).toBe("(0010,0010)");
+  });
+
+  it("pads and upper-cases the hex of an attribute tag", () => {
+    const node = read(shortVr(0x0009, 0x0001, "AT", [...u16(0x00e1), ...u16(0x00ab)]))("00090001");
+    expect(node?.value).toBe("(00E1,00AB)");
+  });
+
+  it("joins several values with a backslash, as DICOM does", () => {
+    expect(read(shortVr(0x0009, 0x0002, "US", [...u16(1), ...u16(2), ...u16(3)]))("00090002")?.value).toBe("1\\2\\3");
+    expect(read(shortVr(0x0009, 0x0002, "SS", [...i16(-1), ...i16(5)]))("00090002")?.value).toBe("-1\\5");
+    expect(read(shortVr(0x0009, 0x0002, "FD", [...f64(0.5), ...f64(-2)]))("00090002")?.value).toBe("0.5\\-2");
+    const two = shortVr(0x0009, 0x0002, "AT", [...u16(0x10), ...u16(0x10), ...u16(0x10), ...u16(0x20)]);
+    expect(read(two)("00090002")?.value).toBe("(0010,0010)\\(0010,0020)");
+  });
+
+  it("shows sixteen values in full, and cuts a longer list with the count", () => {
+    const list = (n: number) => shortVr(0x0009, 0x0003, "US", Array.from({ length: n }, (_, i) => u16(i + 1)).flat());
+    const sixteen = Array.from({ length: 16 }, (_, i) => i + 1).join("\\");
+
+    expect(read(list(16))("00090003")?.value).toBe(sixteen);
+    expect(read(list(17))("00090003")?.value).toBe(`${sixteen} … (17 values in all)`);
+    expect(read(list(30))("00090003")?.value).toBe(`${sixteen} … (30 values in all)`);
+  });
+
+  it("does not reformat a float: it is JavaScript's own conversion of what the file holds", () => {
+    // 0.1 is not representable in 32 bits. The stored value is what is shown.
+    const node = read(shortVr(0x0009, 0x0004, "FL", f32(0.1)))("00090004");
+    expect(node?.value).toBe(String(Math.fround(0.1)));
+    expect(node?.value).toBe("0.10000000149011612");
+    expect(read(shortVr(0x0009, 0x0005, "FD", f64(0.1)))("00090005")?.value).toBe("0.1");
+    expect(read(shortVr(0x0009, 0x0006, "FL", f32(1e21)))("00090006")?.value).toBe(String(Math.fround(1e21)));
+  });
+
+  it("gives a zero-length numeric element an empty value, as a string VR gets", () => {
+    const node = read(shortVr(0x0009, 0x0007, "US", []))("00090007");
+    expect(node).toHaveProperty("value", "");
+  });
+
+  it("leaves a length that is not a whole number of values unread, rather than guessing", () => {
+    for (const [vr, bytes] of [["US", 3], ["UL", 6], ["FD", 4], ["AT", 2]] as const) {
+      const node = read(shortVr(0x0009, 0x0008, vr, new Array<number>(bytes).fill(1)))("00090008");
+      expect(node?.vr, vr).toBe(vr);
+      expect(node, vr).not.toHaveProperty("value");
+    }
+  });
+
+  // OV is left out: dicom-parser 1.8.21 gives it a 2-byte length like a short VR, so an explicit-VR
+  // OV element cannot be built for it. That is a parser limitation, reported with 1.7a, not fixed.
+  it("leaves the other VRs exactly as they were: UN, OB, OW, OF, OD, OL and SQ read no value", () => {
+    for (const vr of ["OB", "OW", "OF", "OD", "OL", "UN"]) {
+      const node = read(longVr(0x0009, 0x0009, vr, 4, [1, 2, 3, 4]))("00090009");
+      expect(node, vr).not.toHaveProperty("value");
+      expect(node?.length, vr).toBe(4);
+    }
+    const seq = flattenNodes(parseMetadata(undefinedLengthItemFile())).find((n) => n.tag === "00081140");
+    expect(seq).not.toHaveProperty("value");
+  });
+});
+
+describe("walk.ts stays free of the dictionary", () => {
+  it("imports only the parser, the tag helpers, the VR helpers and types: the VR arrives by injection", () => {
+    const source = fs.readFileSync(path.resolve(__dirname, "walk.ts"), "utf8");
+    const modules = source.split("\n").filter((line) => /^\s*import\b/.test(line)).map((line) => /from\s+["']([^"']+)["']/.exec(line)?.[1]);
+
+    expect(modules.sort()).toEqual(["../model/tag", "../model/types", "../model/vr", "dicom-parser", "dicom-parser"]);
+    expect(modules.filter((m) => /dictionary|annex-e|rules/.test(m ?? ""))).toEqual([]);
+  });
+});
+
+describe("the injected VR callback", () => {
+  // Implicit VR little endian: tag, 4-byte length, value. The stream carries no VR.
+  const implicit = (elements: number[]): Uint8Array => {
+    const ts = "1.2.840.10008.1.2\0";
+    const body = [...tagBytes(2, 0x10), ...ascii("UI"), ...u16(ts.length), ...ascii(ts)];
+    const meta = [...tagBytes(2, 0), ...ascii("UL"), ...u16(4), ...u32(body.length), ...body];
+    return new Uint8Array([...new Array<number>(128).fill(0), ...ascii("DICM"), ...meta, ...elements]);
+  };
+  const el = (group: number, element: number, body: number[]): number[] => [...tagBytes(group, element), ...u32(body.length), ...body];
+  const data = implicit([...el(0x10, 0x10, ascii("A^B ")), ...el(0x28, 0x10, u16(256)), ...el(0x29, 0x1001, ascii("SECRET"))]);
+  const dictionary: Record<string, string> = { x00100010: "PN", x00280010: "US" };
+
+  it("without one, behaves as before: every implicit element is UN and none has a value", () => {
+    const nodes = parseMetadata(data);
+    expect(nodes.filter((n) => n.tag !== "00020000" && n.tag !== "00020010").map((n) => [n.tag, n.vr])).toEqual([
+      ["00100010", "UN"],
+      ["00280010", "UN"],
+      ["00291001", "UN"],
+    ]);
+    expect(nodes.filter((n) => "value" in n && n.tag !== "00020000" && n.tag !== "00020010")).toEqual([]);
+  });
+
+  it("with one, resolves the VR it returns and reads the value", () => {
+    const nodes = parseMetadata(data, { vrCallback: (tag) => dictionary[tag] });
+    const byTag = new Map(nodes.map((n) => [n.tag, n]));
+
+    expect(byTag.get("00100010")).toMatchObject({ vr: "PN", value: "A^B" });
+    expect(byTag.get("00280010")).toMatchObject({ vr: "US", value: "256" });
+  });
+
+  it("falls back to UN, with no value, where it returns undefined", () => {
+    const nodes = parseMetadata(data, { vrCallback: (tag) => dictionary[tag] });
+    const secret = nodes.find((n) => n.tag === "00291001");
+
+    expect(secret?.vr).toBe("UN");
+    expect(secret).not.toHaveProperty("value");
+    expect(secret?.length).toBe(6);
+  });
+
+  it("is not called for an explicit-VR file, where the stream carries the VR", () => {
+    const seen: string[] = [];
+    const nodes = parseMetadata(bytes, { vrCallback: (tag) => (seen.push(tag), undefined) });
+
+    expect(seen).toEqual([]);
+    expect(nodes).toEqual(tree);
+  });
+
+  it("is given dicom-parser's own tag format: an x and eight lowercase hex characters", () => {
+    const seen: string[] = [];
+    parseMetadata(data, { vrCallback: (tag) => (seen.push(tag), undefined) });
+
+    expect(seen).toEqual(["x00100010", "x00280010", "x00291001"]);
+    for (const tag of seen) expect(tag).toMatch(/^x[0-9a-f]{8}$/);
+  });
+});
+
 describe("structural delimiters (group FFFE)", () => {
   it("are absent from the fixture tree", () => {
     expect(flat.filter((node) => tagGroup(node.tag) === 0xfffe)).toEqual([]);
