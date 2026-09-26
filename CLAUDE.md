@@ -83,6 +83,8 @@ do not delete sections, except Screenshots on steps with no visible change. Past
 Acceptance checks, Invariants and Build status; never paraphrase or summarise it. Include any
 step-specific checks the prompt asks for under Acceptance checks. Leave the reviewer checklist unticked —
 it belongs to the repository owner. `.pr-description.md` is gitignored and must never be committed. Your
-final message in the session is the full contents of that file.
+final message in the session is the full contents of that file. Consider the fact a human has to read and
+parse the text of the PR so do not write it as a super long document. Be Direct, and explain in as little
+as possible the most amount of info while following the template.
 
 Never state that something works if you did not run it.
