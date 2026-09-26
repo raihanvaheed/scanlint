@@ -65,30 +65,6 @@ Only the ones the existing code does not already demonstrate.
 - Breakage you find that is unrelated to the task: report it, do not fix it.
 - Leave nothing behind: no dead code, commented-out blocks, scratch files, or debug logging.
 
-## Definition of done
-
-Before the final message, all of these are true.
-
-1. The change is complete and scoped to exactly what was asked.
-2. Test, lint, type and build commands were run, and their real output is included.
-3. New behaviour has a test that fails without the change.
-4. No invariant was weakened.
-5. Unspecified decisions and open questions are written down.
-
-## Final message
-
-Fill in `.github/pull_request_template.md` completely and save the result as `.pr-description.md` at the
-repository root. Do not modify the template. Answer every section, writing "None" where nothing applies;
-do not delete sections, except Screenshots on steps with no visible change. Paste real command output in
-Acceptance checks, Invariants and Build status; never paraphrase or summarise it. Include any
-step-specific checks the prompt asks for under Acceptance checks. Leave the reviewer checklist unticked —
-it belongs to the repository owner. `.pr-description.md` is gitignored and must never be committed. Your
-final message in the session is the full contents of that file. Consider the fact a human has to read and
-parse the text of the PR so do not write it as a super long document. Be Direct, and explain in as little
-as possible the most amount of info while following the template.
-
-Never state that something works if you did not run it.
-
 # Explanation file
 
 At the end of every step, before writing the pull request description, write `explanation.md` at the
@@ -114,3 +90,27 @@ describing internal progress as though it were visible.
 
 Write it as though explaining to someone who has been away for a week. The PR description is where
 detail belongs; this file is where clarity does.
+
+# Definition of done
+
+Before the final message, all of these are true.
+
+1. The change is complete and scoped to exactly what was asked.
+2. Test, lint, type and build commands were run, and their real output is included.
+3. New behaviour has a test that fails without the change.
+4. No invariant was weakened.
+5. Unspecified decisions and open questions are written down.
+
+## Final message
+
+Fill in `.github/pull_request_template.md` completely and save the result as `.pr-description.md` at the
+repository root. Do not modify the template. Answer every section, writing "None" where nothing applies;
+do not delete sections, except Screenshots on steps with no visible change. Paste real command output in
+Acceptance checks, Invariants and Build status; never paraphrase or summarise it. Include any
+step-specific checks the prompt asks for under Acceptance checks. Leave the reviewer checklist unticked —
+it belongs to the repository owner. `.pr-description.md` is gitignored and must never be committed. Your
+final message in the session is the full contents of that file. Consider the fact a human has to read and
+parse the text of the PR so do not write it as a super long document. Be Direct, and explain in as little
+as possible the most amount of info while following the template.
+
+Never state that something works if you did not run it.
