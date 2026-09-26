@@ -6,7 +6,14 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Finding, TagNode } from "../model/types";
 import { handleParse } from "../parse/handle";
-import { FieldTree } from "./field-tree";
+import { useReveal } from "./field-value";
+import { FieldTree as BareFieldTree } from "./field-tree";
+
+// The tree no longer owns its reveal state: the screen does. This owns it for a tree on its own.
+function FieldTree({ nodes, findings, announce }: { nodes: TagNode[]; findings: Finding[]; announce?: (message: string) => void }) {
+  const reveal = useReveal(findings, announce);
+  return <BareFieldTree nodes={nodes} findings={findings} reveal={reveal} />;
+}
 
 afterEach(cleanup);
 
@@ -42,10 +49,12 @@ describe("collapsed by default", () => {
   // happy-dom does not turn Enter or Space on a summary into a toggle, as a browser does, so the
   // keyboard operation itself is checked in a real browser. What can be checked here is that the
   // summary is a plain native one, first in the tab order, with no handler of ours in the way.
-  it("puts the native summary first in the tab order, with no key handling of its own", async () => {
+  it("puts the native summary next in the tab order after the skip link, with no key handling of its own", async () => {
     const user = userEvent.setup();
     render(<FieldTree nodes={nodes} findings={findings} />);
 
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("link", { name: "Back to findings" }));
     await user.tab();
     const summary = document.querySelector("section > details > summary") as HTMLElement;
     expect(document.activeElement).toBe(summary);
@@ -146,7 +155,8 @@ describe("marking findings", () => {
 
     expect(document.querySelectorAll(".border-l-4.border-signal")).toHaveLength(28);
     expect(screen.getAllByText("finding")).toHaveLength(28);
-    const burnedIn = screen.getByText("Burned In Annotation").closest(".border-l-4") as HTMLElement;
+    const burnedIn = screen.getByText("Burned In Annotation").closest("[data-finding]") as HTMLElement;
+    expect(burnedIn.getAttribute("data-finding")).toBe("false");
     expect(burnedIn.classList.contains("border-signal")).toBe(false);
     expect(within(burnedIn).queryByText("finding")).toBeNull();
   });
@@ -168,7 +178,8 @@ describe("marking findings", () => {
     render(<FieldTree nodes={nodes} findings={findings} />);
     await openTree(user);
 
-    const mark = screen.getByText("Modality").closest(".border-l-4") as HTMLElement;
+    const mark = screen.getByText("Modality").closest("[data-finding]") as HTMLElement;
+    expect(mark.getAttribute("data-finding")).toBe("false");
     expect(mark.classList.contains("border-signal")).toBe(false);
     expect(within(mark).queryByText("finding")).toBeNull();
   });
@@ -306,5 +317,112 @@ describe("a file with compressed pixel data", () => {
     expect(row.getByText("<binary, length not stated>")).toBeTruthy();
     expect(document.body.textContent).not.toContain("4,294,967,295");
     expect(document.body.textContent).not.toContain("4294967295");
+  });
+});
+
+describe("the finding label", () => {
+  it("sits on the same line as the name, tag and VR, not below the value", async () => {
+    const user = userEvent.setup();
+    render(<FieldTree nodes={nodes} findings={findings} />);
+    await openTree(user);
+
+    const row = screen.getByText("Patient's Name").closest("li") as HTMLElement;
+    const label = within(row).getByText("finding");
+    const tag = within(row).getByText("(0010,0010)");
+    const value = row.querySelector("div.mt-1") as HTMLElement;
+
+    expect(label.parentElement).toBe(tag.parentElement);
+    expect(label.previousElementSibling?.textContent).toBe("PN");
+    expect(tag.nextElementSibling?.textContent).toBe("PN");
+    expect(value.contains(label)).toBe(false);
+    expect(label.compareDocumentPosition(value) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("still has the screen-reader prefix and the signal border", async () => {
+    const user = userEvent.setup();
+    render(<FieldTree nodes={nodes} findings={findings} />);
+    await openTree(user);
+
+    const mark = screen.getByText("Patient's Name").closest(".border-l-4") as HTMLElement;
+    expect(mark.classList.contains("border-signal")).toBe(true);
+    expect(mark.querySelector(".sr-only")?.textContent).toBe("Finding: ");
+  });
+
+  it("is beside the title of a sequence too", async () => {
+    const user = userEvent.setup();
+    render(<FieldTree nodes={nodes} findings={findings} />);
+    await openTree(user);
+
+    const summary = summaryOf("Original Attributes Sequence (1 item)");
+    const label = within(summary).getByText("finding");
+    expect(label.parentElement).toBe(within(summary).getByText("(0400,0561)").parentElement);
+  });
+});
+
+describe("forced colours and the accessible name", () => {
+  it("draws no border at all on a kept row, so forced-colours mode cannot turn it into a marker", async () => {
+    const user = userEvent.setup();
+    render(<FieldTree nodes={nodes} findings={findings} />);
+    await openTree(user);
+
+    const kept = [...document.querySelectorAll('[data-finding="false"]')] as HTMLElement[];
+    expect(kept.length).toBeGreaterThan(20);
+    for (const mark of kept) expect(mark.className).not.toMatch(/border/);
+    const flaggedMarks = [...document.querySelectorAll('[data-finding="true"]')] as HTMLElement[];
+    expect(flaggedMarks).toHaveLength(28);
+    for (const mark of flaggedMarks) expect(mark.className).toContain("border-l-4");
+  });
+
+  it("separates the parts of a row's name with spaces, so a screen reader does not run them together", async () => {
+    const user = userEvent.setup();
+    render(<FieldTree nodes={nodes} findings={findings} />);
+    await openTree(user);
+
+    const summary = summaryOf("Original Attributes Sequence (1 item)");
+    expect(summary.textContent).toBe("▸Finding: Original Attributes Sequence (1 item) (0400,0561) SQ finding");
+    const row = screen.getByText("Patient's Name").closest("[data-finding]") as HTMLElement;
+    expect(row.textContent).toMatch(/^Finding: Patient's Name \(0010,0010\) PN finding/);
+  });
+});
+
+describe("the word finding is not read twice", () => {
+  // What an accessibility tree would give as a name: the text, less anything hidden from it.
+  const raw = (el: Element): string =>
+    [...el.childNodes]
+      .map((n) => (n.nodeType === Node.TEXT_NODE ? (n.textContent ?? "") : (n as Element).getAttribute("aria-hidden") === "true" ? "" : raw(n as Element)))
+      .join("");
+  const spoken = (el: Element): string => raw(el).replace(/\s+/g, " ").trim();
+
+  it("hides the visible label from assistive technology, and keeps the screen-reader prefix", async () => {
+    const user = userEvent.setup();
+    render(<FieldTree nodes={nodes} findings={findings} />);
+    await openTree(user);
+
+    const labels = screen.getAllByText("finding");
+    expect(labels).toHaveLength(28);
+    for (const label of labels) expect(label.getAttribute("aria-hidden")).toBe("true");
+    const prefixes = [...document.querySelectorAll(".sr-only")].filter((el) => el.textContent === "Finding: ");
+    expect(prefixes).toHaveLength(28);
+  });
+
+  it("gives a sequence summary a name that begins Finding: and does not end in finding", async () => {
+    const user = userEvent.setup();
+    render(<FieldTree nodes={nodes} findings={findings} />);
+    await openTree(user);
+
+    const name = spoken(summaryOf("Original Attributes Sequence (1 item)").querySelector("span.min-w-0") as Element);
+    expect(name).toBe("Finding: Original Attributes Sequence (1 item) (0400,0561) SQ");
+    expect(name.toLowerCase()).not.toMatch(/finding$/);
+    expect(name.toLowerCase().split("finding").length - 1).toBe(1);
+  });
+
+  it("says finding once for a plain row too", async () => {
+    const user = userEvent.setup();
+    render(<FieldTree nodes={nodes} findings={findings} />);
+    await openTree(user);
+
+    const row = screen.getByText("Patient's Name").closest("[data-finding]") as HTMLElement;
+    expect(spoken(row)).toMatch(/^Finding: Patient's Name \(0010,0010\) PN/);
+    expect(spoken(row).toLowerCase().split("finding").length - 1).toBe(1);
   });
 });

@@ -6,8 +6,10 @@ import { flattenNodes } from "../model/tree";
 import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
 import { FieldTree } from "./field-tree";
+import { useReveal } from "./field-value";
 import { FindingsList } from "./findings-list";
-import { FOCUS_RING, FOCUS_RING_WITHIN } from "./focus";
+import { FOCUS_RING, FOCUS_RING_WITHIN, TREE_HEADING_ID } from "./focus";
+import { SkipLink } from "./skip-link";
 
 type LoadScreenProps = {
   parse: (bytes: ArrayBuffer) => Promise<ParseOutcome>;
@@ -47,6 +49,19 @@ function summarise(nodes: TagNode[], findings: Finding[]): Summary {
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+// Mounted only while a result is on screen, so the reveal state it holds is gone when the user leaves it.
+function LoadedResult({ nodes, findings, announce }: { nodes: TagNode[]; findings: Finding[]; announce: (message: string) => void }) {
+  const reveal = useReveal(findings, announce);
+
+  return (
+    <>
+      <SkipLink targetId={TREE_HEADING_ID}>Skip to all fields</SkipLink>
+      <FindingsList findings={findings} reveal={reveal} />
+      <FieldTree nodes={nodes} findings={findings} reveal={reveal} />
+    </>
+  );
 }
 
 export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
@@ -149,7 +164,7 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
             onDragLeave={onDragLeave}
             onDrop={onDrop}
             className={`flex flex-col items-center rounded-lg border-2 border-dashed px-6 py-10 text-center ${
-              dragging ? "border-signal bg-paper" : "border-rule bg-surface"
+              dragging ? "border-signal bg-paper" : "border-shade bg-surface"
             }`}
           >
             <p className="text-xl text-ink">Drop a DICOM file here</p>
@@ -161,7 +176,7 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
               ref={sampleButton}
               type="button"
               onClick={() => void analyse(SAMPLE_NAME, loadSample, "The sample file could not be loaded.")}
-              className={`mt-8 cursor-pointer rounded-md bg-signal px-8 py-3 text-lg font-semibold text-paper hover:brightness-110 ${FOCUS_RING}`}
+              className={`mt-8 cursor-pointer rounded-md border-2 border-transparent bg-signal px-[30px] py-2.5 text-lg font-semibold text-paper hover:brightness-110 ${FOCUS_RING}`}
             >
               Load sample
             </button>
@@ -182,7 +197,7 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
 
           {view.kind === "loaded" && (
             <div>
-              <h2 ref={resultHeading} tabIndex={-1} className="break-all rounded text-lg font-semibold text-ink focus:outline-2 focus:outline-offset-4 focus:outline-signal">
+              <h2 ref={resultHeading} tabIndex={-1} className="break-all rounded text-lg font-semibold text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-signal">
                 {view.name}
               </h2>
               <p className="mt-4 text-2xl font-semibold text-ink">
@@ -224,10 +239,7 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
         </div>
 
         {view.kind === "loaded" && (
-          <>
-            <FindingsList findings={view.findings} announce={setAnnouncement} />
-            <FieldTree nodes={view.nodes} findings={view.findings} announce={setAnnouncement} />
-          </>
+          <LoadedResult nodes={view.nodes} findings={view.findings} announce={setAnnouncement} />
         )}
 
         {(view.kind === "loaded" || view.kind === "error") && (
@@ -235,7 +247,7 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
             ref={anotherButton}
             type="button"
             onClick={() => setView({ kind: "idle" })}
-            className={`mt-8 cursor-pointer rounded-md border-2 border-rule px-5 py-2 text-ink hover:border-signal ${FOCUS_RING}`}
+            className={`mt-8 cursor-pointer rounded-md border-2 border-shade px-5 py-2 text-ink hover:border-signal ${FOCUS_RING}`}
           >
             Load another file
           </button>

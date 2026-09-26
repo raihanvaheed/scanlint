@@ -16,12 +16,22 @@ type Numeric = { width: number; read: (dataSet: DataSet, key: string, index: num
 
 const str = (n: number | undefined): string | undefined => (n === undefined ? undefined : String(n));
 
+// The fewest digits that still name exactly this 32-bit float. It is not rounding: the result converts
+// back to the same float32. (A float32 read into a JS number carries 17 digits, most of them noise.)
+function formatFloat32(v: number): string {
+  for (let p = 1; p <= 9; p++) {
+    const s = v.toPrecision(p);
+    if (Math.fround(Number(s)) === v) return String(Number(s));
+  }
+  return String(v);
+}
+
 const NUMERIC_VRS: Record<string, Numeric> = {
   US: { width: 2, read: (d, k, i) => str(d.uint16(k, i)) },
   SS: { width: 2, read: (d, k, i) => str(d.int16(k, i)) },
   UL: { width: 4, read: (d, k, i) => str(d.uint32(k, i)) },
   SL: { width: 4, read: (d, k, i) => str(d.int32(k, i)) },
-  FL: { width: 4, read: (d, k, i) => str(d.float(k, i)) },
+  FL: { width: 4, read: (d, k, i) => { const v = d.float(k, i); return v === undefined ? undefined : formatFloat32(v); } },
   FD: { width: 8, read: (d, k, i) => str(d.double(k, i)) },
   // An attribute tag is a tag, so it is shown as one.
   AT: {

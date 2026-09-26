@@ -150,3 +150,12 @@ describe("isMaskable", () => {
     for (const vr of BINARY_VRS) expect(isMaskable({ vr, value: "x" })).toBe(false);
   });
 });
+
+describe("the reveal control's border", () => {
+  it("uses --shade, which measures 7.8:1 against the page, and not --rule, which measures 1.3:1", () => {
+    renderValue();
+    const button = screen.getByRole("button");
+    expect(button.className).toContain("border-shade");
+    expect(button.className).not.toContain("border-rule");
+  });
+});

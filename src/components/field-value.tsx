@@ -1,3 +1,8 @@
+"use client";
+
+import { useState } from "react";
+import { identifyingFindings } from "../model/tree";
+import type { Finding } from "../model/types";
 import { isBinaryVr } from "../model/vr";
 import { FOCUS_RING } from "./focus";
 
@@ -9,6 +14,47 @@ type Maskable = { value?: string; vr: string };
 /** Whether there is anything to hide. Empty values, binary values and sequences have no text to mask. */
 export function isMaskable({ value, vr }: Maskable): boolean {
   return !isBinaryVr(vr) && value !== undefined && value !== "";
+}
+
+/** The paths of the identifying findings that have text to hide. Both views mask exactly these. */
+function maskablePaths(findings: Finding[]): string[] {
+  return identifyingFindings(findings).filter(isMaskable).map((finding) => finding.path);
+}
+
+export type Reveal = {
+  revealed: ReadonlySet<string>;
+  hasMaskable: boolean;
+  allRevealed: boolean;
+  toggle: (path: string, label: string) => void;
+  toggleAll: () => void;
+};
+
+/**
+ * Which values are revealed, shared by every view of the same findings. The owner of the result calls
+ * this once, so a value moves in both views and `Reveal all` does what it says. Nothing is persisted:
+ * the state is gone when the owner unmounts. `announce` gets a plain sentence for a live region.
+ */
+export function useReveal(findings: Finding[], announce?: (message: string) => void): Reveal {
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
+  const maskable = maskablePaths(findings);
+  const allRevealed = maskable.length > 0 && maskable.every((path) => revealed.has(path));
+
+  return {
+    revealed,
+    hasMaskable: maskable.length > 0,
+    allRevealed,
+    toggle(path, label) {
+      const next = new Set(revealed);
+      const showing = !next.delete(path);
+      if (showing) next.add(path);
+      setRevealed(next);
+      announce?.(`${label} ${showing ? "revealed" : "hidden"}`);
+    },
+    toggleAll() {
+      setRevealed(allRevealed ? new Set() : new Set(maskable));
+      announce?.(allRevealed ? "All values hidden" : "All values revealed");
+    },
+  };
 }
 
 type FieldValueProps = Maskable & {
@@ -48,7 +94,7 @@ export function FieldValue({ name, value, vr, length, flagged, revealed, onToggl
           type="button"
           onClick={onToggle}
           aria-label={`${revealed ? "Hide" : "Reveal"} ${name}`}
-          className={`cursor-pointer rounded border border-rule px-2 py-0.5 text-sm text-ink hover:border-signal ${FOCUS_RING}`}
+          className={`cursor-pointer rounded border border-shade px-2 py-0.5 text-sm text-ink hover:border-signal ${FOCUS_RING}`}
         >
           {revealed ? "Hide" : "Reveal"}
         </button>
