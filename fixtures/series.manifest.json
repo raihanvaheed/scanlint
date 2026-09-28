@@ -1,0 +1,631 @@
+{
+  "manifestVersion": 1,
+  "generator": "scripts/make-sample-study.py",
+  "pathFormat": "tag segments are 8 lowercase hex chars; sequence item segments are zero-based indices; segments joined by /",
+  "directory": "fixtures/series",
+  "studyInstanceUid": "2.25.271828182845904523536028747135266249",
+  "note": "Grouping is by the SeriesInstanceUID written in each file. Series A has 10 files and B has 5, because A-9 carries B's UID. Per-file findings are not listed: every slice is built from the same source as public/samples/single.dcm, whose manifest covers classification.",
+  "series": [
+    {
+      "label": "A",
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "modality": "MR",
+      "expectedSpacingMm": 3.0,
+      "files": [
+        "IM_0003",
+        "IM_0004",
+        "IM_0006",
+        "IM_0007",
+        "IM_0009",
+        "IM_0010",
+        "IM_0011",
+        "IM_0013",
+        "IM_0014",
+        "IM_0015"
+      ],
+      "spatialOrder": [
+        {
+          "file": "IM_0009",
+          "distanceAlongNormalMm": 0.0
+        },
+        {
+          "file": "IM_0003",
+          "distanceAlongNormalMm": 3.0
+        },
+        {
+          "file": "IM_0011",
+          "distanceAlongNormalMm": 6.0
+        },
+        {
+          "file": "IM_0015",
+          "distanceAlongNormalMm": 9.0
+        },
+        {
+          "file": "IM_0006",
+          "distanceAlongNormalMm": 12.0
+        },
+        {
+          "file": "IM_0014",
+          "distanceAlongNormalMm": 15.0
+        },
+        {
+          "file": "IM_0007",
+          "distanceAlongNormalMm": 21.0
+        },
+        {
+          "file": "IM_0013",
+          "distanceAlongNormalMm": 27.0
+        },
+        {
+          "file": "IM_0010",
+          "distanceAlongNormalMm": 30.0
+        },
+        {
+          "file": "IM_0004",
+          "distanceAlongNormalMm": 33.0
+        }
+      ]
+    },
+    {
+      "label": "B",
+      "seriesInstanceUid": "2.25.693147180559945309417232121458176568",
+      "modality": "CT",
+      "expectedSpacingMm": 5.0,
+      "files": [
+        "IM_0001",
+        "IM_0002",
+        "IM_0005",
+        "IM_0008",
+        "IM_0012"
+      ],
+      "spatialOrder": [
+        {
+          "file": "IM_0005",
+          "distanceAlongNormalMm": 0.0
+        },
+        {
+          "file": "IM_0012",
+          "distanceAlongNormalMm": 5.0
+        },
+        {
+          "file": "IM_0002",
+          "distanceAlongNormalMm": 10.0
+        },
+        {
+          "file": "IM_0008",
+          "distanceAlongNormalMm": 15.0
+        },
+        {
+          "file": "IM_0001",
+          "distanceAlongNormalMm": 24.0
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "file": "IM_0001",
+      "sha256": "852a5adf756d26412077cf571219535354a778b5be8a831f7b17e778ae21c7a5",
+      "plannedSeries": "A",
+      "plannedSlice": 9,
+      "seriesInstanceUid": "2.25.693147180559945309417232121458176568",
+      "sopInstanceUid": "2.25.271828182845904523536028747144",
+      "modality": "MR",
+      "instanceNumber": "9",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        24.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ],
+      "fault": {
+        "id": "A-9",
+        "note": "carries series B's SeriesInstanceUID"
+      }
+    },
+    {
+      "file": "IM_0002",
+      "sha256": "a418c5b56b7f383c73cbeb2acde772ed608bcfc592a7c764b1d21230e664dc4f",
+      "plannedSeries": "B",
+      "plannedSlice": 3,
+      "seriesInstanceUid": "2.25.693147180559945309417232121458176568",
+      "sopInstanceUid": "2.25.271828182845904523536028748138",
+      "modality": "CT",
+      "instanceNumber": "3",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        10.0
+      ],
+      "pixelSpacing": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "file": "IM_0003",
+      "sha256": "56cbcb5559fafebebe937a3298d9c1c2f8cf1fd6577c08ecf7adccec8097168a",
+      "plannedSeries": "A",
+      "plannedSlice": 2,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747137",
+      "modality": "MR",
+      "instanceNumber": "2",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        3.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "file": "IM_0004",
+      "sha256": "15f557865e07b0bc3a681e579610c667057ccfaae007674309a28b7151d38862",
+      "plannedSeries": "A",
+      "plannedSlice": 12,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747147",
+      "modality": "MR",
+      "instanceNumber": "12",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        33.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "file": "IM_0005",
+      "sha256": "6adfb205197ee06dd2fa9a2a1eebe8579a021e112f6002cb5670e2ea807ef6be",
+      "plannedSeries": "B",
+      "plannedSlice": 1,
+      "seriesInstanceUid": "2.25.693147180559945309417232121458176568",
+      "sopInstanceUid": "2.25.271828182845904523536028748136",
+      "modality": "CT",
+      "instanceNumber": "1",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        0.0
+      ],
+      "pixelSpacing": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "file": "IM_0006",
+      "sha256": "8dc04d703fc0029d8bec412dcaa7b43910ae65c9c5a0cd822a1521d3bb7fcb2f",
+      "plannedSeries": "A",
+      "plannedSlice": 5,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747140",
+      "modality": "MR",
+      "instanceNumber": "5",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        12.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ],
+      "fault": {
+        "id": "A-5",
+        "note": "PatientID differs from every other slice"
+      }
+    },
+    {
+      "file": "IM_0007",
+      "sha256": "2079cd61f83b20e7c43d40b9b37336c3294e24f971769083d0824cecd376a7ca",
+      "plannedSeries": "A",
+      "plannedSlice": 8,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747143",
+      "modality": "MR",
+      "instanceNumber": "8",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        21.0
+      ],
+      "pixelSpacing": [
+        0.6,
+        0.6
+      ],
+      "fault": {
+        "id": "A-8",
+        "note": "PixelSpacing 0.6 where the rest have 0.5"
+      }
+    },
+    {
+      "file": "IM_0008",
+      "sha256": "5b2ee9b36189bd38fe60123da6e3ca7f0905dc5fb6dae0ba63c6b10aa587e007",
+      "plannedSeries": "B",
+      "plannedSlice": 4,
+      "seriesInstanceUid": "2.25.693147180559945309417232121458176568",
+      "sopInstanceUid": "2.25.271828182845904523536028748139",
+      "modality": "CT",
+      "instanceNumber": "4",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        15.0
+      ],
+      "pixelSpacing": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "file": "IM_0009",
+      "sha256": "651dc14d822f4ffb7f509392922a18710fe3c7c6f044d5f837a87f8edede656e",
+      "plannedSeries": "A",
+      "plannedSlice": 1,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747136",
+      "modality": "MR",
+      "instanceNumber": "1",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        0.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "file": "IM_0010",
+      "sha256": "c0ec587b44d46a784f6a138d84120ee47c35830b59d525ebbe6269b98f1194d4",
+      "plannedSeries": "A",
+      "plannedSlice": 11,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747146",
+      "modality": "MR",
+      "instanceNumber": "2",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        30.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ],
+      "fault": {
+        "id": "A-11",
+        "note": "InstanceNumber is 2, and is wrong"
+      }
+    },
+    {
+      "file": "IM_0011",
+      "sha256": "39f085d3a0312cf515110912a4ca8d8c274290618bf685e82060f80bf771b90e",
+      "plannedSeries": "A",
+      "plannedSlice": 3,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747138",
+      "modality": "MR",
+      "instanceNumber": "3",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        6.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ],
+      "fault": {
+        "id": "A-3",
+        "note": "the only slice with ReferringPhysicianName"
+      }
+    },
+    {
+      "file": "IM_0012",
+      "sha256": "d1ff656846160505904c005b51638a845eb07bce0157de9bd084a84c8d1c2716",
+      "plannedSeries": "B",
+      "plannedSlice": 2,
+      "seriesInstanceUid": "2.25.693147180559945309417232121458176568",
+      "sopInstanceUid": "2.25.271828182845904523536028748137",
+      "modality": "CT",
+      "instanceNumber": "2",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        5.0
+      ],
+      "pixelSpacing": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "file": "IM_0013",
+      "sha256": "62f0653eac8814652475ff70b2f8c6068f2b504768baf39ae08b5c471d006612",
+      "plannedSeries": "A",
+      "plannedSlice": 10,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747145",
+      "modality": "MR",
+      "instanceNumber": "10",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        27.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "file": "IM_0014",
+      "sha256": "3f6b18930e39090173bef3b6330546c56185a03d6c1ee443520f303112bc55af",
+      "plannedSeries": "A",
+      "plannedSlice": 6,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747141",
+      "modality": "MR",
+      "instanceNumber": "6",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        15.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "file": "IM_0015",
+      "sha256": "a42d1682f99cc9bf32abe2763724e19c2dd76438a9dc943527249768f193c14d",
+      "plannedSeries": "A",
+      "plannedSlice": 4,
+      "seriesInstanceUid": "2.25.577215664901532860606512090082402431",
+      "sopInstanceUid": "2.25.271828182845904523536028747139",
+      "modality": "MR",
+      "instanceNumber": "4",
+      "imagePositionPatient": [
+        -100.0,
+        -100.0,
+        9.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.5
+      ]
+    }
+  ],
+  "seriesFindings": [
+    {
+      "kind": "position-gap",
+      "series": "2.25.577215664901532860606512090082402431",
+      "files": [
+        "IM_0014",
+        "IM_0007"
+      ],
+      "expectedMm": 3.0,
+      "actualMm": 6.0,
+      "cause": "slice A-7 is not written"
+    },
+    {
+      "kind": "extra-field",
+      "series": "2.25.577215664901532860606512090082402431",
+      "tag": "00080090",
+      "path": "00080090",
+      "files": [
+        "IM_0011"
+      ],
+      "note": "no other file has this tag at any depth"
+    },
+    {
+      "kind": "varying-value",
+      "series": "2.25.577215664901532860606512090082402431",
+      "tag": "00100020",
+      "files": [
+        "IM_0006"
+      ],
+      "values": {
+        "IM_0006": "SCANLINT-MISFILED-0005"
+      },
+      "otherFiles": "SCANLINT-TEST-0001"
+    },
+    {
+      "kind": "inconsistent-pixel-spacing",
+      "series": "2.25.577215664901532860606512090082402431",
+      "files": [
+        "IM_0007"
+      ],
+      "values": {
+        "IM_0007": [
+          0.6,
+          0.6
+        ]
+      },
+      "expected": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "kind": "mixed-modality",
+      "level": "folder",
+      "modalities": {
+        "MR": {
+          "series": "2.25.577215664901532860606512090082402431",
+          "files": [
+            "IM_0001",
+            "IM_0003",
+            "IM_0004",
+            "IM_0006",
+            "IM_0007",
+            "IM_0009",
+            "IM_0010",
+            "IM_0011",
+            "IM_0013",
+            "IM_0014",
+            "IM_0015"
+          ]
+        },
+        "CT": {
+          "series": "2.25.693147180559945309417232121458176568",
+          "files": [
+            "IM_0002",
+            "IM_0005",
+            "IM_0008",
+            "IM_0012"
+          ]
+        }
+      }
+    }
+  ],
+  "consequencesOfMisfiledSlice": [
+    {
+      "kind": "position-gap",
+      "series": "2.25.577215664901532860606512090082402431",
+      "files": [
+        "IM_0007",
+        "IM_0013"
+      ],
+      "expectedMm": 3.0,
+      "actualMm": 6.0,
+      "cause": "A-9 left this series"
+    },
+    {
+      "kind": "position-gap",
+      "series": "2.25.693147180559945309417232121458176568",
+      "files": [
+        "IM_0008",
+        "IM_0001"
+      ],
+      "expectedMm": 5.0,
+      "actualMm": 9.0,
+      "cause": "A-9 joined this series"
+    },
+    {
+      "kind": "inconsistent-pixel-spacing",
+      "series": "2.25.693147180559945309417232121458176568",
+      "files": [
+        "IM_0001"
+      ],
+      "values": {
+        "IM_0001": [
+          0.5,
+          0.5
+        ]
+      },
+      "expected": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "kind": "mixed-modality",
+      "level": "series",
+      "series": "2.25.693147180559945309417232121458176568",
+      "modalities": {
+        "CT": [
+          "IM_0005",
+          "IM_0012",
+          "IM_0002",
+          "IM_0008"
+        ],
+        "MR": [
+          "IM_0001"
+        ]
+      }
+    },
+    {
+      "kind": "varying-value",
+      "series": "2.25.693147180559945309417232121458176568",
+      "files": [
+        "IM_0001"
+      ],
+      "identifyingTags": [
+        "0008103e"
+      ],
+      "otherTags": [
+        "00020002",
+        "00080016",
+        "00080060",
+        "00180050",
+        "00180080",
+        "00180081",
+        "00180087",
+        "00180088",
+        "00200011",
+        "00280030"
+      ],
+      "note": "tags whose value differs, or that are present in only one, between this file and the rest of the series, less those that vary legitimately (instance UIDs, InstanceNumber, position, slice location)"
+    }
+  ],
+  "findingsUnion": {
+    "tags": [
+      "00020003",
+      "00080018",
+      "00080020",
+      "00080030",
+      "00080050",
+      "00080080",
+      "00080081",
+      "00080090",
+      "00081030",
+      "0008103e",
+      "00081050",
+      "00081070",
+      "00100010",
+      "00100020",
+      "00100030",
+      "00100040",
+      "00101000",
+      "00101040",
+      "00102154",
+      "0020000d",
+      "0020000e",
+      "00200010",
+      "00200052",
+      "00290010",
+      "00291001",
+      "00291002",
+      "04000550",
+      "04000561"
+    ]
+  },
+  "skipped": [
+    {
+      "file": ".DS_Store",
+      "kind": "macos-metadata",
+      "dicom": false
+    },
+    {
+      "file": "thumbnail.jpg",
+      "kind": "jpeg-image",
+      "dicom": false
+    },
+    {
+      "file": "README.txt",
+      "kind": "text",
+      "dicom": false
+    },
+    {
+      "file": "DICOMDIR",
+      "kind": "media-storage-directory",
+      "dicom": true,
+      "sopClassUid": "1.2.840.10008.1.3.10",
+      "note": "a valid DICOM Part 10 file with no image and no directory records: skipped by SOP Class, not by name, would be the check that generalises"
+    }
+  ]
+}
