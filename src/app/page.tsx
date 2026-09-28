@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { LoadScreen } from "../components/load-screen";
 import { loadSample } from "../lib/load-sample";
-import { createPool } from "../parse/pool";
+import { createPool, defaultPoolSize } from "../parse/pool";
 import type { Pool } from "../parse/pool";
 
 export default function Home() {
@@ -23,5 +23,6 @@ export default function Home() {
     return pool.current.parse(bytes);
   }, []);
 
-  return <LoadScreen parse={parse} loadSample={loadSample} />;
+  // createPool() below is never given a size, so this mirrors its own default exactly.
+  return <LoadScreen parse={parse} loadSample={loadSample} concurrency={defaultPoolSize()} />;
 }

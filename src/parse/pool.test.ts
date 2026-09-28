@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createPool } from "./pool";
+import { createPool, defaultPoolSize } from "./pool";
 import type { ParseRequest, ParseResult } from "./protocol";
 
 class FakeWorker {
@@ -290,5 +290,19 @@ describe("default pool size", () => {
     [undefined, 2],
   ])("with hardwareConcurrency %s creates %s workers for a full queue", (cores, expected) => {
     expect(sizeFor(cores)).toBe(expected);
+  });
+
+  // Callers that need the worker count up front — reading a file only once a worker is free for it,
+  // rather than gating on the pool's own eventual worker count — rely on this floor directly, not
+  // only on createPool's own Math.max(1, ...), since createPool's floor cannot help a caller that
+  // never constructs a pool with this value.
+  it.each([
+    [0, 1],
+    [1, 1],
+    [16, 4],
+    [undefined, 2],
+  ])("defaultPoolSize itself never returns fewer than 1, with hardwareConcurrency %s", (cores, expected) => {
+    vi.stubGlobal("navigator", { hardwareConcurrency: cores });
+    expect(defaultPoolSize()).toBe(expected);
   });
 });
