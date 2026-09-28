@@ -65,10 +65,24 @@ Only the ones the existing code does not already demonstrate.
 - Breakage you find that is unrelated to the task: report it, do not fix it.
 - Leave nothing behind: no dead code, commented-out blocks, scratch files, or debug logging.
 
+# The `local/` folder
+
+`local/` is at the repository root and is gitignored. Nothing in it is ever committed, staged or pushed.
+It holds two kinds of thing:
+
+- **Files you produce for the owner and no one else:** `local/explanation.md` and `local/.pr-description.md`.
+  Never write these to the repository root.
+- **Files the owner gives you to refer to:** briefs, prompts, reference material, screenshots, anything else
+  handed over. Look here when the owner mentions a file you have not seen. Read them; do not edit or delete
+  them unless asked.
+
+Scratch output that no one asked for still belongs in the session scratchpad, not here. If `local/` does
+not exist, create it. Anything you put there must not be needed to build, test or run the project.
+
 # Explanation file
 
-At the end of every step, before writing the pull request description, write `explanation.md` at the
-repository root. It is gitignored and must never be committed. Overwrite it each step — it describes
+At the end of every step, before writing the pull request description, write `local/explanation.md`. It is
+gitignored (with the rest of `local/`) and must never be committed. Overwrite it each step — it describes
 the current state, not a history.
 
 It is read before the PR description and exists to be short. Under 400 words. Plain language. No
@@ -103,12 +117,11 @@ Before the final message, all of these are true.
 
 ## Final message
 
-Fill in `.github/pull_request_template.md` completely and save the result as `.pr-description.md` at the
-repository root. Do not modify the template. Answer every section, writing "None" where nothing applies;
+Fill in `.github/pull_request_template.md` completely and save the result as `local/.pr-description.md`. Do not modify the template. Answer every section, writing "None" where nothing applies;
 do not delete sections, except Screenshots on steps with no visible change. Paste real command output in
 Acceptance checks, Invariants and Build status; never paraphrase or summarise it. Include any
 step-specific checks the prompt asks for under Acceptance checks. Leave the reviewer checklist unticked —
-it belongs to the repository owner. `.pr-description.md` is gitignored and must never be committed. Your
+it belongs to the repository owner. `local/.pr-description.md` is gitignored and must never be committed. Your
 final message in the session is the full contents of that file. Consider the fact a human has to read and
 parse the text of the PR so do not write it as a super long document. Be Direct, and explain in as little
 as possible the most amount of info while following the template.

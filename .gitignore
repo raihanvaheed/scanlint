@@ -22,6 +22,8 @@
 
 # misc
 .DS_Store
+# the series fixture deliberately contains one, as a real folder would
+!/fixtures/series/.DS_Store
 *.pem
 
 # debug
@@ -43,6 +45,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# pull request description
-.pr-description.md
-explanation.md
+# local working files: PR description, explanation, and anything handed over for reference
+/local/
