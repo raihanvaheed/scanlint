@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
+import { collectEntries, extractEntries } from "../lib/directory-entries";
+import { parseMany } from "../lib/parse-many";
+import type { FileResult, FileSource } from "../lib/parse-many";
 import { flattenNodes } from "../model/tree";
 import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
@@ -9,22 +12,30 @@ import { FieldTree } from "./field-tree";
 import { useReveal } from "./field-value";
 import { FindingsList } from "./findings-list";
 import { FOCUS_RING, FOCUS_RING_WITHIN, TREE_HEADING_ID } from "./focus";
+import { MultiFileList, MultiFileTotals, summariseMany } from "./multi-file-result";
 import { SkipLink } from "./skip-link";
 
 type LoadScreenProps = {
   parse: (bytes: ArrayBuffer) => Promise<ParseOutcome>;
   loadSample: () => Promise<ArrayBuffer>;
+  /** How many files may be read and parsed at once. Pass the pool's own worker count, so a
+   * folder's files are never all read into memory ahead of the workers that will handle them. */
+  concurrency: number;
 };
 
 type Counted = "annex-e" | "private";
 
 type Summary = { fields: number; findings: number; byKind: Record<Counted, number>; burnedIn: string[] };
 
+type PickedFile = { file: File; relativePath?: string };
+
 type View =
   | { kind: "idle" }
   | { kind: "loading"; name: string }
   | { kind: "loaded"; name: string; summary: Summary; nodes: TagNode[]; findings: Finding[] }
-  | { kind: "error"; headline: string; detail: string };
+  | { kind: "error"; headline: string; detail: string }
+  | { kind: "loading-many"; done: number; total: number }
+  | { kind: "loaded-many"; selected: number; results: FileResult[]; cancelled: boolean };
 
 const SAMPLE_NAME = "single.dcm";
 
@@ -64,21 +75,30 @@ function LoadedResult({ nodes, findings, announce }: { nodes: TagNode[]; finding
   );
 }
 
-export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
+export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) {
   const [view, setView] = useState<View>({ kind: "idle" });
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const sampleButton = useRef<HTMLButtonElement>(null);
   const anotherButton = useRef<HTMLButtonElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const cancelledRef = useRef(false);
   const [announcement, setAnnouncement] = useState("");
   const previousKind = useRef(view.kind);
+
+  // webkitdirectory has no JSX prop: it is a non-standard, lowercase HTML attribute, set
+  // imperatively instead. The input only exists while idle, so this must re-run on every return
+  // to idle, not just once — an empty dependency array would miss every input after the first.
+  useEffect(() => {
+    folderInput.current?.setAttribute("webkitdirectory", "");
+  });
 
   useEffect(() => {
     if (previousKind.current !== view.kind) {
       if (view.kind === "idle") sampleButton.current?.focus();
       // The result is long, so focus goes to its top. The button is at the bottom, after every row.
-      if (view.kind === "loaded") resultHeading.current?.focus();
+      if (view.kind === "loaded" || view.kind === "loaded-many") resultHeading.current?.focus();
       if (view.kind === "error") anotherButton.current?.focus();
     }
     previousKind.current = view.kind;
@@ -119,9 +139,52 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
     void analyse(file.name, () => file.arrayBuffer(), "This file could not be read.");
   }
 
+  // One file, through any of the three inputs or a drop, is still the single-file flow above.
+  // Only two or more files bring up the multi-file screen.
+  async function handleFiles(picked: PickedFile[]) {
+    if (picked.length === 0) return;
+    if (picked.length === 1) {
+      readFile(picked[0].file);
+      return;
+    }
+
+    cancelledRef.current = false;
+    setAnnouncement(`Reading ${picked.length} files…`);
+    setView({ kind: "loading-many", done: 0, total: picked.length });
+
+    const sources: FileSource[] = picked.map(({ file, relativePath }) => ({
+      name: file.name,
+      relativePath,
+      peek: () => file.slice(0, 132).arrayBuffer(),
+      read: () => file.arrayBuffer(),
+    }));
+
+    const results = await parseMany(sources, {
+      concurrency,
+      parse,
+      onResult: () => {
+        setView((v) => (v.kind === "loading-many" ? { ...v, done: v.done + 1 } : v));
+      },
+      isCancelled: () => cancelledRef.current,
+    });
+
+    setView({ kind: "loaded-many", selected: picked.length, results, cancelled: cancelledRef.current });
+  }
+
+  function cancelMany() {
+    cancelledRef.current = true;
+  }
+
   function onChoose(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (file) readFile(file);
+    const files = event.target.files;
+    if (!files) return;
+    void handleFiles(
+      Array.from(files, (file) => ({
+        file,
+        relativePath: (file as File & { webkitRelativePath?: string }).webkitRelativePath || undefined,
+      })),
+    );
+    event.target.value = "";
   }
 
   function onDragEnter(event: DragEvent<HTMLDivElement>) {
@@ -144,8 +207,22 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
     event.preventDefault();
     dragDepth.current = 0;
     setDragging(false);
-    const file = event.dataTransfer.files[0];
-    if (file) readFile(file);
+
+    // DataTransferItemList is only valid synchronously, inside this handler: entries are
+    // extracted here, before any await, and walked afterwards.
+    const items = event.dataTransfer.items;
+    const canWalk = items && items.length > 0 && typeof (items[0] as unknown as { webkitGetAsEntry?: unknown }).webkitGetAsEntry === "function";
+    const entries = canWalk ? extractEntries(items) : [];
+    // webkitGetAsEntry exists on every item yet can still return null for one, so a drag with
+    // the method present is not guaranteed to yield any entry: fall back to the plain file list
+    // whenever the walk would otherwise hand back nothing.
+    const files = Array.from(event.dataTransfer.files);
+
+    if (entries.length > 0) {
+      void collectEntries(entries).then((collected) => handleFiles(collected.map(({ file, relativePath }) => ({ file, relativePath }))));
+    } else {
+      void handleFiles(files.map((file) => ({ file })));
+    }
   }
 
   return (
@@ -169,8 +246,12 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
           >
             <p className="text-xl text-ink">Drop a DICOM file here</p>
             <label className={`mt-2 cursor-pointer rounded text-ink underline underline-offset-4 ${FOCUS_RING_WITHIN}`}>
-              or choose a file
-              <input type="file" onChange={onChoose} className="sr-only" />
+              or choose files
+              <input type="file" multiple onChange={onChoose} className="sr-only" />
+            </label>
+            <label className={`mt-2 cursor-pointer rounded text-ink underline underline-offset-4 ${FOCUS_RING_WITHIN}`}>
+              or choose a folder
+              <input ref={folderInput} type="file" multiple onChange={onChoose} className="sr-only" />
             </label>
             <button
               ref={sampleButton}
@@ -184,6 +265,10 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
         )}
 
         <div aria-live="polite" role="status">
+          {/* Always present, so an explicit announcement (start, or a multi-file completion) fires
+              the moment it is set, whatever view is on screen at the time. */}
+          <p className="sr-only">{announcement}</p>
+
           {view.kind === "loading" && (
             <div>
               <p className="text-ink">
@@ -226,7 +311,6 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
                   <p className="mt-1 text-sm text-shade">{BURNED_IN_CAVEAT}</p>
                 </div>
               )}
-              <p className="sr-only">{announcement}</p>
             </div>
           )}
 
@@ -236,20 +320,47 @@ export function LoadScreen({ parse, loadSample }: LoadScreenProps) {
               <p className="mt-2 break-words text-sm text-shade">{view.detail}</p>
             </div>
           )}
+
+          {view.kind === "loaded-many" && (
+            <MultiFileTotals totals={summariseMany(view.results, view.selected)} cancelled={view.cancelled} headingRef={resultHeading} />
+          )}
         </div>
+
+        {/* Outside the live region: a bar redrawn on every file would be announced every time,
+            which is exactly the per-file spam section 8 rules out. */}
+        {view.kind === "loading-many" && (
+          <div>
+            <p className="text-ink">{`${view.done} of ${view.total} files read…`}</p>
+            <div aria-hidden="true" className="mt-4 h-1 w-full overflow-hidden rounded bg-rule">
+              <div
+                className="h-full bg-signal motion-safe:transition-[width]"
+                style={{ width: `${view.total === 0 ? 0 : Math.round((view.done / view.total) * 100)}%` }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={cancelMany}
+              className={`mt-4 cursor-pointer rounded-md border-2 border-shade px-5 py-2 text-ink hover:border-signal ${FOCUS_RING}`}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         {view.kind === "loaded" && (
           <LoadedResult nodes={view.nodes} findings={view.findings} announce={setAnnouncement} />
         )}
 
-        {(view.kind === "loaded" || view.kind === "error") && (
+        {view.kind === "loaded-many" && <MultiFileList results={view.results} />}
+
+        {(view.kind === "loaded" || view.kind === "error" || view.kind === "loaded-many") && (
           <button
             ref={anotherButton}
             type="button"
             onClick={() => setView({ kind: "idle" })}
             className={`mt-8 cursor-pointer rounded-md border-2 border-shade px-5 py-2 text-ink hover:border-signal ${FOCUS_RING}`}
           >
-            Load another file
+            {view.kind === "loaded-many" ? "Load another" : "Load another file"}
           </button>
         )}
       </div>

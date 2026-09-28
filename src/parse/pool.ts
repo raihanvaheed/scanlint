@@ -23,8 +23,11 @@ type Slot = { worker: Worker; job: Job | undefined };
 
 const defaultCreateWorker = () => new Worker(new URL("./worker.ts", import.meta.url));
 
-function defaultSize(): number {
-  return Math.min(4, globalThis.navigator?.hardwareConcurrency ?? 2);
+/** The worker count `createPool` uses when not given one. Exported so callers that need to know
+ * the concurrency bound in advance — reading files no faster than the pool can parse them — do not
+ * have to duplicate this logic or wait for the pool's first job to find it out. */
+export function defaultPoolSize(): number {
+  return Math.max(1, Math.min(4, globalThis.navigator?.hardwareConcurrency ?? 2));
 }
 
 function toError(e: unknown): Error {
@@ -32,7 +35,7 @@ function toError(e: unknown): Error {
 }
 
 export function createPool(options: { size?: number; createWorker?: () => Worker } = {}): Pool {
-  const size = Math.max(1, options.size ?? defaultSize());
+  const size = Math.max(1, options.size ?? defaultPoolSize());
   const createWorker = options.createWorker ?? defaultCreateWorker;
 
   const slots: Slot[] = [];

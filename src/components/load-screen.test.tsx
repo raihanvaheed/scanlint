@@ -35,31 +35,52 @@ function outcome(counts: { annex?: number; priv?: number; burned?: number }, bur
 const sampleBytes = new ArrayBuffer(8);
 const CAVEAT = "ScanLint reports what this field says. It cannot see text printed into the image itself.";
 
-function setup(parseResult: ParseOutcome | Error, loadResult: ArrayBuffer | Error = sampleBytes) {
+function setup(parseResult: ParseOutcome | Error, loadResult: ArrayBuffer | Error = sampleBytes, concurrency = 4) {
   const parse = vi.fn<(bytes: ArrayBuffer) => Promise<ParseOutcome>>(() =>
     parseResult instanceof Error ? Promise.reject(parseResult) : Promise.resolve(parseResult),
   );
   const loadSample = vi.fn<() => Promise<ArrayBuffer>>(() =>
     loadResult instanceof Error ? Promise.reject(loadResult) : Promise.resolve(loadResult),
   );
-  const view = render(<LoadScreen parse={parse} loadSample={loadSample} />);
+  const view = render(<LoadScreen parse={parse} loadSample={loadSample} concurrency={concurrency} />);
   return { parse, loadSample, user: userEvent.setup(), ...view };
 }
 
 describe("idle", () => {
-  it("shows Load sample, the file input and the privacy line", () => {
+  it("shows Load sample, both file inputs and the privacy line", () => {
     setup(outcome({}));
 
     expect(screen.getByRole("button", { name: "Load sample" })).toBeTruthy();
     expect(screen.getByText("Drop a DICOM file here")).toBeTruthy();
-    expect((screen.getByLabelText("or choose a file") as HTMLInputElement).type).toBe("file");
+    expect((screen.getByLabelText("or choose files") as HTMLInputElement).type).toBe("file");
+    expect((screen.getByLabelText("or choose a folder") as HTMLInputElement).type).toBe("file");
     expect(screen.getByText("Files are read in your browser. Nothing is uploaded.")).toBeTruthy();
   });
 
-  it("gives the file input no accept attribute, because real DICOM files often have no extension", () => {
+  it("gives neither file input an accept attribute, because real DICOM files often have no extension", () => {
     setup(outcome({}));
 
-    expect(screen.getByLabelText("or choose a file").hasAttribute("accept")).toBe(false);
+    expect(screen.getByLabelText("or choose files").hasAttribute("accept")).toBe(false);
+    expect(screen.getByLabelText("or choose a folder").hasAttribute("accept")).toBe(false);
+  });
+
+  it("gives the file input multiple, and marks the folder input with webkitdirectory", () => {
+    setup(outcome({}));
+
+    expect((screen.getByLabelText("or choose files") as HTMLInputElement).multiple).toBe(true);
+    const folderInput = screen.getByLabelText("or choose a folder") as HTMLInputElement;
+    expect(folderInput.multiple).toBe(true);
+    expect(folderInput.hasAttribute("webkitdirectory")).toBe(true);
+  });
+
+  it("still has webkitdirectory on the folder input after a full cycle back to idle", async () => {
+    const { user } = setup(outcome({ annex: 1 }));
+    await user.click(screen.getByRole("button", { name: "Load sample" }));
+    await screen.findByText("1 could identify a patient");
+    await user.click(screen.getByRole("button", { name: "Load another file" }));
+
+    // Idle is a freshly mounted block, including a new <input>, not the one checked above.
+    expect(screen.getByLabelText("or choose a folder").hasAttribute("webkitdirectory")).toBe(true);
   });
 
   it("has a polite aria-live status region", () => {
