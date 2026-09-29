@@ -429,7 +429,17 @@
       "files": [
         "IM_0011"
       ],
-      "note": "no other file has this tag at any depth"
+      "note": "no other file has this tag at the top level"
+    },
+    {
+      "kind": "extra-field",
+      "series": "2.25.577215664901532860606512090082402431",
+      "tag": "00080090",
+      "path": "04000561/0/04000550/0/00080090",
+      "files": [
+        "IM_0011"
+      ],
+      "note": "no other file has ReferringPhysicianName nested here either"
     },
     {
       "kind": "varying-value",

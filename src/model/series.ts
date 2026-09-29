@@ -3,12 +3,16 @@ import type { Orientation, Vector3 } from "./geometry";
 
 export type OrderedBy = "position" | "instance-number" | "filename";
 
+/** Why an instance couldn't be grouped. Only ever set on an entry in `Grouping.ungrouped`. */
+export type UngroupedReason = "missing-study" | "missing-series" | "missing-both";
+
 export type Instance = {
   fileName: string;
   relativePath?: string;
   sopInstanceUid?: string;
   instanceNumber?: number;
   distance?: number;
+  ungroupedReason?: UngroupedReason;
 };
 
 export type Series = {
@@ -125,7 +129,13 @@ export function groupAndOrder(files: ParsedInstance[]): Grouping {
 
   for (const file of files) {
     if (file.studyInstanceUid === undefined || file.seriesInstanceUid === undefined) {
-      ungrouped.push(toInstance(file));
+      const ungroupedReason: UngroupedReason =
+        file.studyInstanceUid === undefined && file.seriesInstanceUid === undefined
+          ? "missing-both"
+          : file.studyInstanceUid === undefined
+            ? "missing-study"
+            : "missing-series";
+      ungrouped.push({ ...toInstance(file), ungroupedReason });
       continue;
     }
     let bySeries = byStudy.get(file.studyInstanceUid);

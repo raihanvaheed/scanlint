@@ -224,6 +224,19 @@ describe("fallbacks", () => {
     expect(series.orderedBy).toBe("position");
     expect(series.orientationConsistent).toBe(true);
   });
+
+  it("nine slices agreeing and one genuinely different plane is still reported inconsistent - the realistic shape of the fault", () => {
+    const different: Orientation = [1, 0, 0, 0, 0, -1]; // coronal, not axial
+    const files = [
+      ...Array.from({ length: 9 }, (_, n) =>
+        file({ fileName: `s${n}`, instanceNumber: n, imageOrientationPatient: axial, imagePositionPatient: [0, 0, n * 10] }),
+      ),
+      file({ fileName: "odd-one-out", instanceNumber: 9, imageOrientationPatient: different, imagePositionPatient: [0, 0, 90] }),
+    ];
+    const [series] = groupAndOrder(files).studies[0].series;
+    expect(series.orientationConsistent).toBe(false);
+    expect(series.orderedBy).toBe("instance-number");
+  });
 });
 
 describe("grouping", () => {
@@ -239,22 +252,30 @@ describe("grouping", () => {
     expect(grouping.studies.map((s) => s.studyInstanceUid).sort()).toEqual(["1.1", "2.2"]);
   });
 
-  it("puts a file missing SeriesInstanceUID in ungrouped, not dropped", () => {
+  it("puts a file missing SeriesInstanceUID in ungrouped, not dropped, with reason missing-series", () => {
     const files = [
       file({ fileName: "a", studyInstanceUid: "1.1", seriesInstanceUid: "1.1.1" }),
       file({ fileName: "orphan", studyInstanceUid: "1.1" }),
     ];
     const grouping = groupAndOrder(files);
     expect(grouping.ungrouped.map((i) => i.fileName)).toEqual(["orphan"]);
+    expect(grouping.ungrouped[0].ungroupedReason).toBe("missing-series");
     expect(grouping.studies).toHaveLength(1);
     expect(grouping.studies[0].series[0].instances).toHaveLength(1);
   });
 
-  it("puts a file missing StudyInstanceUID in ungrouped too", () => {
+  it("puts a file missing StudyInstanceUID in ungrouped too, with reason missing-study", () => {
     const files = [file({ fileName: "orphan", seriesInstanceUid: "1.1.1" })];
     const grouping = groupAndOrder(files);
     expect(grouping.ungrouped.map((i) => i.fileName)).toEqual(["orphan"]);
+    expect(grouping.ungrouped[0].ungroupedReason).toBe("missing-study");
     expect(grouping.studies).toHaveLength(0);
+  });
+
+  it("a file missing both identifiers gets reason missing-both", () => {
+    const files = [file({ fileName: "orphan" })];
+    const grouping = groupAndOrder(files);
+    expect(grouping.ungrouped[0].ungroupedReason).toBe("missing-both");
   });
 
   it("sorts multiple ungrouped files by filename, regardless of input order", () => {
