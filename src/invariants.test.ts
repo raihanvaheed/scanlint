@@ -69,6 +69,40 @@ describe("project invariants", () => {
       ["walk", "handle", "phi", "dictionary"].includes(spec.split("/").pop()!.replace(/\.[jt]sx?$/, ""));
     const filesIn = (dirs: string[]) => dirs.flatMap((dir) => listSourceFiles(path.join(ROOT, dir)));
 
+    // Resolves one relative import specifier to the file it names, the way node/TS module
+    // resolution would - only relative specifiers are followed; a bare package name (dicom-parser,
+    // react, ...) has no file of ours to walk into.
+    const resolveImport = (fromFile: string, spec: string): string | undefined => {
+      if (!spec.startsWith(".")) return undefined;
+      const base = path.resolve(path.dirname(fromFile), spec);
+      const candidates = [base, `${base}.ts`, `${base}.tsx`, `${base}.json`, path.join(base, "index.ts")];
+      return candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
+    };
+
+    // Every file reachable from `entryFiles` by following relative imports, transitively - the
+    // actual graph a bundler would walk, not just each file's own direct imports.
+    const collectImportGraph = (entryFiles: string[]): Set<string> => {
+      const visited = new Set<string>();
+      const queue = entryFiles.map((f) => path.resolve(f));
+
+      while (queue.length > 0) {
+        const file = queue.pop()!;
+        if (visited.has(file)) continue;
+        visited.add(file);
+        if (!/\.tsx?$/.test(file)) continue;
+
+        const content = fs.readFileSync(file, "utf8");
+        for (const spec of importSpecifiers(content)) {
+          const next = resolveImport(file, spec);
+          if (next !== undefined && !visited.has(next)) queue.push(next);
+        }
+      }
+
+      return visited;
+    };
+
+    const relOf = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
+
     it("no file under src/app or src/components imports the parser, the rules, or the dictionary", () => {
       for (const file of filesIn(UI_DIRS)) {
         const offending = importSpecifiers(fs.readFileSync(file, "utf8")).filter(isWorkerOnly);
@@ -97,6 +131,43 @@ describe("project invariants", () => {
     it("the import check does catch a forbidden import (guards against it going blind)", () => {
       const source = 'import x from "../model/dictionary";\nimport y from "dicom-parser";\nconst z = await import("../parse/walk");\nimport t from "../model/tree";';
       expect(importSpecifiers(source).filter(isWorkerOnly)).toEqual(["../model/dictionary", "dicom-parser", "../parse/walk"]);
+    });
+
+    // A positive control for collectImportGraph itself, over the same root the test below uses:
+    // src/parse genuinely does reach the dictionary (handle.ts) and annex-e (via rules/phi.ts), so
+    // if the traversal ever stopped following imports, this would fail rather than letting the
+    // tests below pass vacuously.
+    it("the transitive graph walker does find the dictionary from src/parse (guards against it going blind)", () => {
+      const graph = [...collectImportGraph(listSourceFiles(path.join(ROOT, "src/parse")))].map(relOf);
+      expect(graph).toContain("src/model/dictionary.ts");
+      expect(graph).toContain("src/model/annex-e.ts");
+    });
+
+    // src/pixels re-parses the file with dicom-parser directly, on purpose (see 3.2). It must never
+    // need the 604 KB dictionary or the Annex E rules to turn bytes into pixels - and, looking
+    // ahead to 3.5, it must never need a codec either, in the other direction.
+    it("nothing reachable from src/pixels is the dictionary, annex-e, or a rule", () => {
+      const graph = collectImportGraph(listSourceFiles(path.join(ROOT, "src/pixels")));
+      const offending = [...graph]
+        .map(relOf)
+        .filter((rel) => rel === "src/model/dictionary.ts" || rel === "src/model/dictionary.json" || rel === "src/model/annex-e.ts" || rel === "src/model/annex-e.json" || rel.startsWith("src/rules/"));
+
+      expect(
+        offending,
+        `src/pixels reaches ${offending.join(", ")}. The image path must stay independent of the ` +
+          "standards tables and the PHI rules - pulling them in defeats the point of keeping them out.",
+      ).toEqual([]);
+    });
+
+    it("nothing reachable from the metadata parser is src/pixels", () => {
+      const graph = collectImportGraph(listSourceFiles(path.join(ROOT, "src/parse")));
+      const offending = [...graph].map(relOf).filter((rel) => rel.startsWith("src/pixels/"));
+
+      expect(
+        offending,
+        `the metadata parser reaches ${offending.join(", ")}. src/pixels re-parses the file on its ` +
+          "own; the metadata path must not depend on the pixel-decoding path (or, from 3.5, its codecs).",
+      ).toEqual([]);
     });
   });
 
