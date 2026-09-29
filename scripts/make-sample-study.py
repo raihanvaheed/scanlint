@@ -898,7 +898,23 @@ def build_series_manifest(root: Path, slices: List[Tuple[str, str, int]]) -> dic
                 "tag": "00080090",
                 "path": "00080090",
                 "files": [name],
-                "note": "no other file has this tag at any depth",
+                "note": "no other file has this tag at the top level",
+            })
+            # The same fault also keeps ReferringPhysicianName nested inside the
+            # OriginalAttributesSequence/ModifiedAttributesSequence block (dropped from every other
+            # slice alongside the top-level one). A finding compared by tag number alone would merge
+            # this with the entry above; compared by canonical path, as every other check in this
+            # project is, it is a second, distinct extra-field finding.
+            nested_path = _path_string(
+                [_tag_of("OriginalAttributesSequence"), 0, _tag_of("ModifiedAttributesSequence"), 0, _tag_of("ReferringPhysicianName")]
+            )
+            findings.append({
+                "kind": "extra-field",
+                "series": SERIES_UIDS[label],
+                "tag": "00080090",
+                "path": nested_path,
+                "files": [name],
+                "note": "no other file has ReferringPhysicianName nested here either",
             })
     modalities: Dict[str, dict] = {}
     for name, f in sorted(by_name.items()):

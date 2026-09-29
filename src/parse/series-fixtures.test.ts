@@ -156,10 +156,15 @@ describe("the planted faults", () => {
     expect(p.value("00080060")).toBe("MR");
   });
 
-  it("lists exactly the five kinds of series-level finding", () => {
-    expect(manifest.seriesFindings.map((f) => f.kind).sort()).toEqual(
-      ["extra-field", "inconsistent-pixel-spacing", "mixed-modality", "position-gap", "varying-value"],
-    );
+  it("lists six findings across five kinds of series-level finding - extra-field twice, once per depth A-3's tag appears at", () => {
+    expect(manifest.seriesFindings.map((f) => f.kind).sort()).toEqual([
+      "extra-field",
+      "extra-field",
+      "inconsistent-pixel-spacing",
+      "mixed-modality",
+      "position-gap",
+      "varying-value",
+    ]);
   });
 });
 
