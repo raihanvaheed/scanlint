@@ -5,15 +5,20 @@ import type { ChangeEvent, DragEvent } from "react";
 import { collectEntries, extractEntries } from "../lib/directory-entries";
 import { parseMany } from "../lib/parse-many";
 import type { FileResult, FileSource } from "../lib/parse-many";
-import { flattenNodes } from "../model/tree";
+import { deriveFolderName } from "../lib/series-aggregate";
+import { toParsedInstance } from "../lib/series-input";
+import { buildSeriesReport } from "../lib/series-report";
+import type { ParsedFile, SeriesReport } from "../lib/series-report";
+import type { Grouping } from "../model/series";
+import { groupAndOrder } from "../model/series";
 import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
-import { FieldTree } from "./field-tree";
-import { useReveal } from "./field-value";
-import { FindingsList } from "./findings-list";
-import { FOCUS_RING, FOCUS_RING_WITHIN, TREE_HEADING_ID } from "./focus";
+import { checkSeries } from "../rules/series";
+import type { SeriesFinding } from "../rules/series";
+import { FOCUS_RING, FOCUS_RING_WITHIN } from "./focus";
 import { MultiFileList, MultiFileTotals, summariseMany } from "./multi-file-result";
-import { SkipLink } from "./skip-link";
+import { SeriesBody, SeriesHeader } from "./series-result";
+import { SingleFileDetails, SingleFileHeader } from "./single-file-result";
 
 type LoadScreenProps = {
   parse: (bytes: ArrayBuffer) => Promise<ParseOutcome>;
@@ -23,56 +28,35 @@ type LoadScreenProps = {
   concurrency: number;
 };
 
-type Counted = "annex-e" | "private";
-
-type Summary = { fields: number; findings: number; byKind: Record<Counted, number>; burnedIn: string[] };
-
 type PickedFile = { file: File; relativePath?: string };
+
+/** Built only when more than one file was actually read as DICOM - the series answer replaces the
+ * flat list exactly then, per section 3; zero or one real file keeps the plain list from 2.2. */
+type SeriesData = { folderName?: string; grouping: Grouping; findings: SeriesFinding[]; parsed: Map<string, ParsedFile>; report: SeriesReport };
 
 type View =
   | { kind: "idle" }
   | { kind: "loading"; name: string }
-  | { kind: "loaded"; name: string; summary: Summary; nodes: TagNode[]; findings: Finding[] }
+  | { kind: "loaded"; name: string; nodes: TagNode[]; findings: Finding[] }
   | { kind: "error"; headline: string; detail: string }
   | { kind: "loading-many"; done: number; total: number }
-  | { kind: "loaded-many"; selected: number; results: FileResult[]; cancelled: boolean };
+  | { kind: "loaded-many"; selected: number; results: FileResult[]; cancelled: boolean; series?: SeriesData };
+
+function buildSeriesData(results: FileResult[]): SeriesData {
+  const read = results.filter((r): r is FileResult & { outcome: { kind: "read"; nodes: TagNode[]; findings: Finding[] } } => r.outcome.kind === "read");
+  const parsed = new Map(read.map((r) => [r.name, { nodes: r.outcome.nodes, findings: r.outcome.findings }]));
+  const instances = read.map((r) => toParsedInstance(r.name, r.relativePath, r.outcome.nodes));
+  const grouping = groupAndOrder(instances);
+  const findings = checkSeries(grouping, parsed);
+  const report = buildSeriesReport(grouping, findings, read.map((r) => ({ fileName: r.name, findings: r.outcome.findings })));
+  const folderName = deriveFolderName(results);
+  return folderName === undefined ? { grouping, findings, parsed, report } : { folderName, grouping, findings, parsed, report };
+}
 
 const SAMPLE_NAME = "single.dcm";
 
-const BREAKDOWN: { kind: Counted; label: string }[] = [
-  { kind: "annex-e", label: "named in the DICOM confidentiality profile" },
-  { kind: "private", label: "private tags, contents defined by the manufacturer" },
-];
-
-const BURNED_IN_CAVEAT = "ScanLint reports what this field says. It cannot see text printed into the image itself.";
-
-// The burned-in flag is a statement about the image, not a field holding patient data, so it is
-// reported as the file's own claim and is not counted as identifying.
-function summarise(nodes: TagNode[], findings: Finding[]): Summary {
-  const byKind: Record<Counted, number> = { "annex-e": 0, private: 0 };
-  const burnedIn: string[] = [];
-  for (const finding of findings) {
-    if (finding.kind === "burned-in") burnedIn.push(finding.value ?? "");
-    else byKind[finding.kind] += 1;
-  }
-  return { fields: flattenNodes(nodes).length, findings: byKind["annex-e"] + byKind.private, byKind, burnedIn };
-}
-
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
-}
-
-// Mounted only while a result is on screen, so the reveal state it holds is gone when the user leaves it.
-function LoadedResult({ nodes, findings, announce }: { nodes: TagNode[]; findings: Finding[]; announce: (message: string) => void }) {
-  const reveal = useReveal(findings, announce);
-
-  return (
-    <>
-      <SkipLink targetId={TREE_HEADING_ID}>Skip to all fields</SkipLink>
-      <FindingsList findings={findings} reveal={reveal} />
-      <FieldTree nodes={nodes} findings={findings} reveal={reveal} />
-    </>
-  );
 }
 
 export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) {
@@ -121,13 +105,7 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
       const outcome = await parse(bytes);
       setView(
         outcome.ok
-          ? {
-              kind: "loaded",
-              name,
-              summary: summarise(outcome.nodes, outcome.findings),
-              nodes: outcome.nodes,
-              findings: outcome.findings,
-            }
+          ? { kind: "loaded", name, nodes: outcome.nodes, findings: outcome.findings }
           : { kind: "error", headline: "This file could not be read as DICOM.", detail: outcome.message },
       );
     } catch (e) {
@@ -168,7 +146,14 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
       isCancelled: () => cancelledRef.current,
     });
 
-    setView({ kind: "loaded-many", selected: picked.length, results, cancelled: cancelledRef.current });
+    const readCount = results.filter((r) => r.outcome.kind === "read").length;
+    setView({
+      kind: "loaded-many",
+      selected: picked.length,
+      results,
+      cancelled: cancelledRef.current,
+      series: readCount > 1 ? buildSeriesData(results) : undefined,
+    });
   }
 
   function cancelMany() {
@@ -281,37 +266,7 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
           )}
 
           {view.kind === "loaded" && (
-            <div>
-              <h2 ref={resultHeading} tabIndex={-1} className="break-all rounded text-lg font-semibold text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-signal">
-                {view.name}
-              </h2>
-              <p className="mt-4 text-2xl font-semibold text-ink">
-                {`${view.summary.fields} field${view.summary.fields === 1 ? "" : "s"} read`}
-              </p>
-              <p className="mt-1 text-2xl font-semibold text-ink">
-                {`${view.summary.findings} could identify a patient`}
-              </p>
-              {BREAKDOWN.some(({ kind }) => view.summary.byKind[kind] > 0) && (
-                <ul className="mt-6 space-y-3 text-ink">
-                  {BREAKDOWN.filter(({ kind }) => view.summary.byKind[kind] > 0).map(({ kind, label }) => (
-                    <li key={kind} className="flex gap-4">
-                      <span className="w-8 shrink-0 text-right font-semibold tabular-nums">{view.summary.byKind[kind]}</span>
-                      <span>{label}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {view.summary.burnedIn.length > 0 && (
-                <div className="mt-6">
-                  {view.summary.burnedIn.map((value, index) => (
-                    <p key={index} className="text-ink">
-                      {`This file declares burned-in annotation: ${value === "" ? "(empty)" : value}`}
-                    </p>
-                  ))}
-                  <p className="mt-1 text-sm text-shade">{BURNED_IN_CAVEAT}</p>
-                </div>
-              )}
-            </div>
+            <SingleFileHeader name={view.name} nodes={view.nodes} findings={view.findings} headingRef={resultHeading} />
           )}
 
           {view.kind === "error" && (
@@ -321,9 +276,17 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
             </div>
           )}
 
-          {view.kind === "loaded-many" && (
-            <MultiFileTotals totals={summariseMany(view.results, view.selected)} cancelled={view.cancelled} headingRef={resultHeading} />
-          )}
+          {view.kind === "loaded-many" &&
+            (view.series ? (
+              <SeriesHeader
+                folderName={view.series.folderName}
+                report={view.series.report}
+                skipFail={summariseMany(view.results, view.selected)}
+                headingRef={resultHeading}
+              />
+            ) : (
+              <MultiFileTotals totals={summariseMany(view.results, view.selected)} cancelled={view.cancelled} headingRef={resultHeading} />
+            ))}
         </div>
 
         {/* Outside the live region: a bar redrawn on every file would be announced every time,
@@ -348,10 +311,21 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
         )}
 
         {view.kind === "loaded" && (
-          <LoadedResult nodes={view.nodes} findings={view.findings} announce={setAnnouncement} />
+          <SingleFileDetails nodes={view.nodes} findings={view.findings} announce={setAnnouncement} />
         )}
 
-        {view.kind === "loaded-many" && <MultiFileList results={view.results} />}
+        {view.kind === "loaded-many" &&
+          (view.series ? (
+            <SeriesBody
+              grouping={view.series.grouping}
+              findings={view.series.findings}
+              parsed={view.series.parsed}
+              report={view.series.report}
+              announce={setAnnouncement}
+            />
+          ) : (
+            <MultiFileList results={view.results} />
+          ))}
 
         {(view.kind === "loaded" || view.kind === "error" || view.kind === "loaded-many") && (
           <button

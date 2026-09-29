@@ -17,7 +17,7 @@ type FindingsListProps = {
 
 const PRIVATE_REASON = "private tag, contents defined by the manufacturer";
 
-function Reason({ finding }: { finding: Finding }) {
+export function Reason({ finding }: { finding: Finding }) {
   if (finding.kind === "private") return <span className="text-shade">{PRIVATE_REASON}</span>;
 
   const action = finding.action ?? "";
