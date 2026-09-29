@@ -53,7 +53,10 @@ const PIXEL_SPACING_TAG = normalizeTag("00280030");
 // group's copy of the same per-instance identity SOPInstanceUID (00080018) already carries, varies
 // on every slice by the same design, and floods both fixture series with UID noise if left in - a
 // deviation from the literal list, flagged here and in the PR description rather than made silently.
-const VALUE_EXEMPT_TAGS = new Set(
+// Exported for 2.6a: the report suppresses its "N distinct values" count on these same tags, for the
+// same reason - a per-instance-unique UID varying is guaranteed and worth nothing, and this is the
+// one place that judgement already lives.
+export const VALUE_EXEMPT_TAGS = new Set(
   ["00080018", "00080013", "00080032", "00080033", "0008002A", "00200012", "00201041", "00020003"].map(normalizeTag),
 );
 

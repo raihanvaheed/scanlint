@@ -5,6 +5,7 @@ import type { ChangeEvent, DragEvent } from "react";
 import { collectEntries, extractEntries } from "../lib/directory-entries";
 import { parseMany } from "../lib/parse-many";
 import type { FileResult, FileSource } from "../lib/parse-many";
+import type { FailedFile } from "../lib/report";
 import { deriveFolderName } from "../lib/series-aggregate";
 import { toParsedInstance } from "../lib/series-input";
 import { buildSeriesReport } from "../lib/series-report";
@@ -17,6 +18,7 @@ import { checkSeries } from "../rules/series";
 import type { SeriesFinding } from "../rules/series";
 import { FOCUS_RING, FOCUS_RING_WITHIN } from "./focus";
 import { MultiFileList, MultiFileTotals, summariseMany } from "./multi-file-result";
+import { ReportControls } from "./report-controls";
 import { SeriesBody, SeriesHeader } from "./series-result";
 import { SingleFileDetails, SingleFileHeader } from "./single-file-result";
 
@@ -32,7 +34,14 @@ type PickedFile = { file: File; relativePath?: string };
 
 /** Built only when more than one file was actually read as DICOM - the series answer replaces the
  * flat list exactly then, per section 3; zero or one real file keeps the plain list from 2.2. */
-type SeriesData = { folderName?: string; grouping: Grouping; findings: SeriesFinding[]; parsed: Map<string, ParsedFile>; report: SeriesReport };
+type SeriesData = {
+  folderName?: string;
+  grouping: Grouping;
+  findings: SeriesFinding[];
+  parsed: Map<string, ParsedFile>;
+  report: SeriesReport;
+  failedFiles: FailedFile[];
+};
 
 type View =
   | { kind: "idle" }
@@ -50,7 +59,10 @@ function buildSeriesData(results: FileResult[]): SeriesData {
   const findings = checkSeries(grouping, parsed);
   const report = buildSeriesReport(grouping, findings, read.map((r) => ({ fileName: r.name, findings: r.outcome.findings })));
   const folderName = deriveFolderName(results);
-  return folderName === undefined ? { grouping, findings, parsed, report } : { folderName, grouping, findings, parsed, report };
+  const failedFiles: FailedFile[] = results
+    .filter((r): r is FileResult & { outcome: { kind: "failed"; message: string } } => r.outcome.kind === "failed")
+    .map((r) => ({ name: r.relativePath ?? r.name, message: r.outcome.message }));
+  return folderName === undefined ? { grouping, findings, parsed, report, failedFiles } : { folderName, grouping, findings, parsed, report, failedFiles };
 }
 
 const SAMPLE_NAME = "single.dcm";
@@ -326,6 +338,18 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
           ) : (
             <MultiFileList results={view.results} />
           ))}
+
+        {view.kind === "loaded-many" && view.series && (
+          <ReportControls
+            folderName={view.series.folderName}
+            totals={summariseMany(view.results, view.selected)}
+            grouping={view.series.grouping}
+            findings={view.series.findings}
+            parsed={view.series.parsed}
+            report={view.series.report}
+            failedFiles={view.series.failedFiles}
+          />
+        )}
 
         {(view.kind === "loaded" || view.kind === "error" || view.kind === "loaded-many") && (
           <button

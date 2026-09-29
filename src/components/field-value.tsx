@@ -66,7 +66,7 @@ type FieldValueProps = Maskable & {
   onToggle: () => void;
 };
 
-function plainText({ value, vr, length }: Maskable & { length?: number }): string {
+export function plainText({ value, vr, length }: Maskable & { length?: number }): string {
   if (isBinaryVr(vr)) {
     if (length === undefined) return "<binary, length not stated>";
     return `<binary, ${length.toLocaleString("en-US")} ${length === 1 ? "byte" : "bytes"}>`;

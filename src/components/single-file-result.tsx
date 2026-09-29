@@ -18,7 +18,7 @@ const BREAKDOWN: { kind: Counted; label: string }[] = [
   { kind: "private", label: "private tags, contents defined by the manufacturer" },
 ];
 
-const BURNED_IN_CAVEAT = "ScanLint reports what this field says. It cannot see text printed into the image itself.";
+export const BURNED_IN_CAVEAT = "ScanLint reports what this field says. It cannot see text printed into the image itself.";
 
 // The burned-in flag is a statement about the image, not a field holding patient data, so it is
 // reported as the file's own claim and is not counted as identifying.
