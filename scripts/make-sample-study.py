@@ -1055,6 +1055,474 @@ def verify_series(root: Path, slices: List[Tuple[str, str, int]], manifest: dict
     ok("thumbnail.jpg starts FFD8 and ends FFD9", jpeg[:2] == b"\xff\xd8" and jpeg[-2:] == b"\xff\xd9")
 
 
+# --- Stage 3.1: pixel fixtures ------------------------------------------------------------------
+#
+# A second, minimal dataset builder, deliberately not the PLANTED/Placed apparatus above: that
+# machinery exists to audit every element against Annex E actions, which these files have no need
+# of. What they need instead - pixel representation, rescale, window, and a pattern with a known
+# formula - is declared once, in the constants and functions below, and written and verified from
+# that one source, the same property PLANTED holds for the PHI fixture.
+
+PIXELS_DIR_REL = "fixtures/pixels"
+PIXELS_MANIFEST_REL = "fixtures/pixels.manifest.json"
+
+PATTERN_SIZE = 64
+PATTERN_BITS_ALLOCATED = 16
+PATTERN_BITS_STORED = 12
+PATTERN_HIGH_BIT = PATTERN_BITS_STORED - 1
+
+RESCALE_SLOPE = 2
+RESCALE_INTERCEPT = -1024
+WINDOW_CENTER = 0
+WINDOW_WIDTH = 400
+SECOND_WINDOW_CENTER = 3071
+SECOND_WINDOW_WIDTH = 8190
+
+BURNED_IN_SIZE = 128
+BURNED_IN_TEXT = "TESTPATIENT"
+BURNED_IN_BACKGROUND = 2048
+BURNED_IN_MAX = (1 << PATTERN_BITS_STORED) - 1  # 4095
+
+SECONDARY_CAPTURE_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
+PIXELS_PATIENT_ID = "SCANLINT-PIXELS-0001"
+
+# Three distinct instances: the four pattern-*.dcm variants of the unsigned ramp share one identity
+# (they are the same acquisition, re-encoded - the same relationship single.dcm has to
+# single-implicit.dcm and single-rle.dcm); the signed ramp and the burned-in slice are genuinely
+# different images and each gets its own, matching how a real signed-representation or
+# photometric-interpretation change would in practice mean a new instance, not a transcoding of one.
+PATTERN_STUDY_UID = "2.25.223606797749978980505"  # sqrt(5)
+PATTERN_SERIES_UID = "2.25.244948974278317788134"  # sqrt(6)
+PATTERN_SOP_UID = "2.25.264575131106459071617"  # sqrt(7)
+SIGNED_STUDY_UID = "2.25.316227766016837952279"  # sqrt(10)
+SIGNED_SERIES_UID = "2.25.331662479035539980998"  # sqrt(11)
+SIGNED_SOP_UID = "2.25.360555127546398912486"  # sqrt(13)
+BURNED_IN_STUDY_UID = "2.25.374165738677394132949"  # sqrt(14)
+BURNED_IN_SERIES_UID = "2.25.387298334620741702139"  # sqrt(15)
+BURNED_IN_SOP_UID = "2.25.412310562561766058565"  # sqrt(17)
+
+
+def pattern_pixels_unsigned() -> np.ndarray:
+    """value = y * 64 + x: every 12-bit value 0..4095 exactly once."""
+    yy, xx = np.mgrid[0:PATTERN_SIZE, 0:PATTERN_SIZE]
+    return (yy * PATTERN_SIZE + xx).astype("<u2")
+
+
+def pattern_pixels_signed() -> np.ndarray:
+    """value = y * 64 + x - 2048: every value -2048..2047 exactly once."""
+    yy, xx = np.mgrid[0:PATTERN_SIZE, 0:PATTERN_SIZE]
+    return (yy * PATTERN_SIZE + xx - 2048).astype("<i2")
+
+
+def apply_window(x: float, center: float, width: float) -> int:
+    """PS3.3 C.11.2.1.2, the default LINEAR VOI LUT function, exactly as given: the `- 0.5` and
+    `(w - 1)` terms are not decoration. The naive (x - (c - w/2)) / w * 255 is off by half a level
+    and clips one value differently at each end - this is the literal formula, not that one."""
+    low = center - 0.5 - (width - 1) / 2
+    high = center - 0.5 + (width - 1) / 2
+    if x <= low:
+        y = 0.0
+    elif x > high:
+        y = 255.0
+    else:
+        y = ((x - (center - 0.5)) / (width - 1) + 0.5) * 255
+    return max(0, min(255, round(y)))
+
+
+def windowed_grey(stored: int, center: float, width: float, monochrome1: bool) -> Tuple[float, int]:
+    """(value after rescale, final 0-255 grey). MONOCHROME1 inverts after windowing, never before."""
+    rescaled = stored * RESCALE_SLOPE + RESCALE_INTERCEPT
+    grey = apply_window(rescaled, center, width)
+    if monochrome1:
+        grey = 255 - grey
+    return rescaled, grey
+
+
+# Eight test coordinates as (x, y): x is the column, y is the row, so pixels[y][x] holds the value
+# `y * 64 + x`. The first five are section 6's own; the last three are chosen to fall inside the
+# narrow window's ramp (stored values roughly 413-611) rather than its clipped regions, so between
+# the eight there is at least one clipped-low, one clipped-high and several ramp points.
+PIXEL_TEST_COORDS: List[Tuple[int, int]] = [
+    (0, 0), (63, 0), (0, 63), (63, 63), (32, 32),
+    (0, 7), (32, 8), (0, 9),
+]
+
+GLYPH_WIDTH = 8
+GLYPH_HEIGHT = 12
+
+# Hard-coded 8x12 block bitmaps ('1' = text pixel). TESTPATIENT is eleven letters but only seven are
+# distinct - T, E, S, P, A, I, N - so that is what is defined here; see the PR notes.
+GLYPHS: Dict[str, List[str]] = {
+    "T": [
+        "11111111", "11111111", "00011000", "00011000", "00011000", "00011000",
+        "00011000", "00011000", "00011000", "00011000", "00011000", "00011000",
+    ],
+    "E": [
+        "11111111", "11111111", "11000000", "11000000", "11000000", "11111100",
+        "11111100", "11000000", "11000000", "11000000", "11111111", "11111111",
+    ],
+    "S": [
+        "01111110", "11111111", "11000000", "11000000", "01111110", "00000011",
+        "00000011", "00000011", "11000011", "11111111", "01111110", "00000000",
+    ],
+    "P": [
+        "11111110", "11111111", "11000011", "11000011", "11111111", "11111110",
+        "11000000", "11000000", "11000000", "11000000", "11000000", "00000000",
+    ],
+    "A": [
+        "00111100", "01111110", "11000011", "11000011", "11000011", "11111111",
+        "11111111", "11000011", "11000011", "11000011", "11000011", "00000000",
+    ],
+    "I": [
+        "11111111", "11111111", "00011000", "00011000", "00011000", "00011000",
+        "00011000", "00011000", "00011000", "00011000", "11111111", "11111111",
+    ],
+    "N": [
+        "11000011", "11100011", "11110011", "11111011", "11011111", "11001111",
+        "11000111", "11000011", "11000011", "11000011", "11000011", "00000000",
+    ],
+}
+
+
+def burned_in_bounding_box() -> Tuple[int, int, int, int]:
+    """(rowStart, colStart, rowEnd, colEnd), end-exclusive, of the whole text block."""
+    width = len(BURNED_IN_TEXT) * GLYPH_WIDTH
+    col_start = (BURNED_IN_SIZE - width) // 2
+    row_start = (BURNED_IN_SIZE - GLYPH_HEIGHT) // 2
+    return row_start, col_start, row_start + GLYPH_HEIGHT, col_start + width
+
+
+def burned_in_pixels() -> np.ndarray:
+    image = np.full((BURNED_IN_SIZE, BURNED_IN_SIZE), BURNED_IN_BACKGROUND, dtype="<u2")
+    row0, col0, _, _ = burned_in_bounding_box()
+    for i, ch in enumerate(BURNED_IN_TEXT):
+        for gy, row in enumerate(GLYPHS[ch]):
+            for gx, bit in enumerate(row):
+                if bit == "1":
+                    image[row0 + gy, col0 + i * GLYPH_WIDTH + gx] = BURNED_IN_MAX
+    return image
+
+
+def build_pixel_dataset(
+    *,
+    sop_uid: str,
+    study_uid: str,
+    series_uid: str,
+    rows: int,
+    columns: int,
+    pixel_representation: int,
+    photometric: str,
+    pixels: np.ndarray,
+    transfer_syntax: str = EXPLICIT_VR_LITTLE_ENDIAN,
+    rescale: bool,
+) -> Dataset:
+    ds = Dataset()
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = SECONDARY_CAPTURE_STORAGE
+    meta.MediaStorageSOPInstanceUID = sop_uid
+    meta.TransferSyntaxUID = EXPLICIT_VR_LITTLE_ENDIAN
+    meta.ImplementationClassUID = IMPLEMENTATION_CLASS_UID
+    ds.file_meta = meta
+    ds.preamble = b"\x00" * 128
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+
+    ds.SOPClassUID = SECONDARY_CAPTURE_STORAGE
+    ds.SOPInstanceUID = sop_uid
+    ds.StudyInstanceUID = study_uid
+    ds.SeriesInstanceUID = series_uid
+    ds.SeriesNumber = "1"
+    ds.InstanceNumber = "1"
+    ds.Modality = "OT"
+    ds.PatientID = PIXELS_PATIENT_ID
+    ds.PatientName = "SCANLINT^PIXELTEST"
+
+    ds.Rows = rows
+    ds.Columns = columns
+    ds.BitsAllocated = PATTERN_BITS_ALLOCATED
+    ds.BitsStored = PATTERN_BITS_STORED
+    ds.HighBit = PATTERN_HIGH_BIT
+    ds.PixelRepresentation = pixel_representation
+    ds.PhotometricInterpretation = photometric
+    ds.SamplesPerPixel = 1
+
+    if rescale:
+        ds.RescaleSlope = str(RESCALE_SLOPE)
+        ds.RescaleIntercept = str(RESCALE_INTERCEPT)
+        ds.WindowCenter = str(WINDOW_CENTER)
+        ds.WindowWidth = str(WINDOW_WIDTH)
+
+    ds.add(DataElement(Tag(0x7FE00010), "OW", pixels.tobytes()))
+
+    if transfer_syntax == IMPLICIT_VR_LITTLE_ENDIAN:
+        ds.is_implicit_VR = True
+        meta.TransferSyntaxUID = IMPLICIT_VR_LITTLE_ENDIAN
+    elif transfer_syntax == RLE_LOSSLESS:
+        ds.compress(RLELossless)
+    elif transfer_syntax != EXPLICIT_VR_LITTLE_ENDIAN:
+        raise SystemExit(f"Unsupported transfer syntax: {transfer_syntax}")
+
+    return ds
+
+
+def expected_outputs(pixels: np.ndarray, monochrome1: bool, center: float, width: float) -> List[dict]:
+    entries = []
+    for x, y in PIXEL_TEST_COORDS:
+        stored = int(pixels[y, x])
+        rescaled, grey = windowed_grey(stored, center, width, monochrome1)
+        entries.append({"x": x, "y": y, "stored": stored, "rescaled": rescaled, "grey": grey})
+    return entries
+
+
+def build_pixels(root: Path) -> None:
+    directory = root / PIXELS_DIR_REL
+    directory.mkdir(parents=True, exist_ok=True)
+
+    unsigned_pixels = pattern_pixels_unsigned()
+    signed_pixels = pattern_pixels_signed()
+    burned_pixels = burned_in_pixels()
+
+    datasets = {
+        "pattern-explicit.dcm": build_pixel_dataset(
+            sop_uid=PATTERN_SOP_UID, study_uid=PATTERN_STUDY_UID, series_uid=PATTERN_SERIES_UID,
+            rows=PATTERN_SIZE, columns=PATTERN_SIZE, pixel_representation=0,
+            photometric="MONOCHROME2", pixels=unsigned_pixels,
+            transfer_syntax=EXPLICIT_VR_LITTLE_ENDIAN, rescale=True,
+        ),
+        "pattern-implicit.dcm": build_pixel_dataset(
+            sop_uid=PATTERN_SOP_UID, study_uid=PATTERN_STUDY_UID, series_uid=PATTERN_SERIES_UID,
+            rows=PATTERN_SIZE, columns=PATTERN_SIZE, pixel_representation=0,
+            photometric="MONOCHROME2", pixels=unsigned_pixels,
+            transfer_syntax=IMPLICIT_VR_LITTLE_ENDIAN, rescale=True,
+        ),
+        "pattern-rle.dcm": build_pixel_dataset(
+            sop_uid=PATTERN_SOP_UID, study_uid=PATTERN_STUDY_UID, series_uid=PATTERN_SERIES_UID,
+            rows=PATTERN_SIZE, columns=PATTERN_SIZE, pixel_representation=0,
+            photometric="MONOCHROME2", pixels=unsigned_pixels,
+            transfer_syntax=RLE_LOSSLESS, rescale=True,
+        ),
+        "pattern-signed.dcm": build_pixel_dataset(
+            sop_uid=SIGNED_SOP_UID, study_uid=SIGNED_STUDY_UID, series_uid=SIGNED_SERIES_UID,
+            rows=PATTERN_SIZE, columns=PATTERN_SIZE, pixel_representation=1,
+            photometric="MONOCHROME2", pixels=signed_pixels,
+            transfer_syntax=EXPLICIT_VR_LITTLE_ENDIAN, rescale=True,
+        ),
+        "pattern-mono1.dcm": build_pixel_dataset(
+            sop_uid=PATTERN_SOP_UID, study_uid=PATTERN_STUDY_UID, series_uid=PATTERN_SERIES_UID,
+            rows=PATTERN_SIZE, columns=PATTERN_SIZE, pixel_representation=0,
+            photometric="MONOCHROME1", pixels=unsigned_pixels,
+            transfer_syntax=EXPLICIT_VR_LITTLE_ENDIAN, rescale=True,
+        ),
+        "burned-in.dcm": build_pixel_dataset(
+            sop_uid=BURNED_IN_SOP_UID, study_uid=BURNED_IN_STUDY_UID, series_uid=BURNED_IN_SERIES_UID,
+            rows=BURNED_IN_SIZE, columns=BURNED_IN_SIZE, pixel_representation=0,
+            photometric="MONOCHROME2", pixels=burned_pixels,
+            transfer_syntax=EXPLICIT_VR_LITTLE_ENDIAN, rescale=False,
+        ),
+    }
+    datasets["burned-in.dcm"].BurnedInAnnotation = "NO"
+
+    for name, ds in datasets.items():
+        ds.save_as(str(directory / name), write_like_original=False)
+
+    manifest = build_pixels_manifest(directory)
+    verify_pixels(directory, manifest)
+
+    path = root / PIXELS_MANIFEST_REL
+    path.write_bytes((json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
+
+    print(f"wrote {directory} (6 files)")
+    total = 0
+    for name in sorted(p.name for p in directory.iterdir()):
+        size = (directory / name).stat().st_size
+        total += size
+        print(f"  {name:<22} {size:>7} bytes  sha256 {_sha(directory / name)}")
+    print(f"  total: {total} bytes")
+    print(f"wrote {path} ({path.stat().st_size} bytes, sha256 {_sha(path)})")
+
+
+def build_pixels_manifest(directory: Path) -> dict:
+    """Everything expected of fixtures/pixels/, computed from the files as written to disk - never
+    from the in-memory arrays used to build them, so a write/read round-trip bug cannot hide."""
+    files_manifest: List[dict] = []
+
+    pattern_variants = [
+        ("pattern-explicit.dcm", EXPLICIT_VR_LITTLE_ENDIAN, "MONOCHROME2"),
+        ("pattern-implicit.dcm", IMPLICIT_VR_LITTLE_ENDIAN, "MONOCHROME2"),
+        ("pattern-rle.dcm", RLE_LOSSLESS, "MONOCHROME2"),
+        ("pattern-mono1.dcm", EXPLICIT_VR_LITTLE_ENDIAN, "MONOCHROME1"),
+    ]
+    for name, syntax, photometric in pattern_variants:
+        ds = pydicom.dcmread(str(directory / name))
+        arr = ds.pixel_array.astype("<u2")
+        monochrome1 = photometric == "MONOCHROME1"
+        files_manifest.append({
+            "file": name,
+            "sha256": _sha(directory / name),
+            "transferSyntaxUid": syntax,
+            "rows": PATTERN_SIZE,
+            "columns": PATTERN_SIZE,
+            "bitsAllocated": PATTERN_BITS_ALLOCATED,
+            "bitsStored": PATTERN_BITS_STORED,
+            "highBit": PATTERN_HIGH_BIT,
+            "pixelRepresentation": 0,
+            "photometricInterpretation": photometric,
+            "rescaleSlope": RESCALE_SLOPE,
+            "rescaleIntercept": RESCALE_INTERCEPT,
+            "windowCenter": WINDOW_CENTER,
+            "windowWidth": WINDOW_WIDTH,
+            "pixelArraySha256": hashlib.sha256(arr.tobytes()).hexdigest(),
+            "expectedOutput": expected_outputs(arr, monochrome1, WINDOW_CENTER, WINDOW_WIDTH),
+            "expectedOutputSecondWindow": expected_outputs(arr, monochrome1, SECOND_WINDOW_CENTER, SECOND_WINDOW_WIDTH),
+        })
+
+    signed_ds = pydicom.dcmread(str(directory / "pattern-signed.dcm"))
+    signed_arr = signed_ds.pixel_array.astype("<i2")
+    files_manifest.append({
+        "file": "pattern-signed.dcm",
+        "sha256": _sha(directory / "pattern-signed.dcm"),
+        "transferSyntaxUid": EXPLICIT_VR_LITTLE_ENDIAN,
+        "rows": PATTERN_SIZE,
+        "columns": PATTERN_SIZE,
+        "bitsAllocated": PATTERN_BITS_ALLOCATED,
+        "bitsStored": PATTERN_BITS_STORED,
+        "highBit": PATTERN_HIGH_BIT,
+        "pixelRepresentation": 1,
+        "photometricInterpretation": "MONOCHROME2",
+        "rescaleSlope": RESCALE_SLOPE,
+        "rescaleIntercept": RESCALE_INTERCEPT,
+        "windowCenter": WINDOW_CENTER,
+        "windowWidth": WINDOW_WIDTH,
+        "pixelArraySha256": hashlib.sha256(signed_arr.tobytes()).hexdigest(),
+        "expectedOutput": expected_outputs(signed_arr, False, WINDOW_CENTER, WINDOW_WIDTH),
+        "expectedOutputSecondWindow": expected_outputs(signed_arr, False, SECOND_WINDOW_CENTER, SECOND_WINDOW_WIDTH),
+    })
+
+    burned_ds = pydicom.dcmread(str(directory / "burned-in.dcm"))
+    burned_arr = burned_ds.pixel_array.astype("<u2")
+    row0, col0, row1, col1 = burned_in_bounding_box()
+    files_manifest.append({
+        "file": "burned-in.dcm",
+        "sha256": _sha(directory / "burned-in.dcm"),
+        "transferSyntaxUid": EXPLICIT_VR_LITTLE_ENDIAN,
+        "rows": BURNED_IN_SIZE,
+        "columns": BURNED_IN_SIZE,
+        "bitsAllocated": PATTERN_BITS_ALLOCATED,
+        "bitsStored": PATTERN_BITS_STORED,
+        "highBit": PATTERN_HIGH_BIT,
+        "pixelRepresentation": 0,
+        "photometricInterpretation": "MONOCHROME2",
+        "pixelArraySha256": hashlib.sha256(burned_arr.tobytes()).hexdigest(),
+        "burnedInAnnotation": {
+            "declared": str(burned_ds.BurnedInAnnotation),
+            "deliberatelyFalse": True,
+            "note": "The declaration is deliberately false: the pixels contain the legible text "
+                    "'TESTPATIENT' while the metadata declares no burned-in annotation. This is Stage "
+                    "3's demonstration case for the preview - proof that a clean declaration is not "
+                    "proof of clean pixels - and is not a generator bug.",
+            "text": BURNED_IN_TEXT,
+            "boundingBox": {"rowStart": row0, "colStart": col0, "rowEnd": row1, "colEnd": col1},
+            "textValue": BURNED_IN_MAX,
+            "backgroundValue": BURNED_IN_BACKGROUND,
+        },
+    })
+
+    return {
+        "manifestVersion": 1,
+        "generator": "scripts/make-sample-study.py",
+        "pathFormat": PATH_FORMAT,
+        "directory": PIXELS_DIR_REL,
+        "patternFormula": {
+            "unsigned": "value = y * 64 + x, for y, x each in [0, 64) - every 12-bit value 0..4095 exactly once",
+            "signed": "value = y * 64 + x - 2048, for y, x each in [0, 64) - every value -2048..2047 exactly once",
+            "coordinateConvention": "(x, y): x is the column, y is the row; pixels[y][x] holds the stored value",
+        },
+        "windowingFormula": {
+            "standard": "PS3.3 C.11.2.1.2, the default LINEAR VOI LUT function",
+            "formula": (
+                "x is the value after rescale (x = stored * RescaleSlope + RescaleIntercept), c is "
+                "WindowCenter, w is WindowWidth. If x <= c - 0.5 - (w-1)/2, y = 0. Else if "
+                "x > c - 0.5 + (w-1)/2, y = 255. Else y = ((x - (c - 0.5)) / (w - 1) + 0.5) * 255, "
+                "rounded to the nearest integer and clamped to 0-255. MONOCHROME1 then applies "
+                "y = 255 - y, after windowing, never before."
+            ),
+        },
+        "window": {"center": WINDOW_CENTER, "width": WINDOW_WIDTH, "note": "narrow: clips almost every value to black or white"},
+        "secondWindow": {"center": SECOND_WINDOW_CENTER, "width": SECOND_WINDOW_WIDTH, "note": "full range: ramps almost every value"},
+        "files": files_manifest,
+    }
+
+
+def verify_pixels(directory: Path, manifest: dict) -> None:
+    """Read the written bytes back with pydicom and confirm every check in section 9."""
+    print("pixel checks:")
+
+    def ok(message: str, condition: bool) -> None:
+        if not condition:
+            raise SystemExit(f"pixel check FAILED: {message}")
+        print(f"  ok  {message}")
+
+    explicit = pydicom.dcmread(str(directory / "pattern-explicit.dcm")).pixel_array.astype("<u2")
+    implicit = pydicom.dcmread(str(directory / "pattern-implicit.dcm")).pixel_array.astype("<u2")
+    rle = pydicom.dcmread(str(directory / "pattern-rle.dcm")).pixel_array.astype("<u2")
+    ok(
+        "pattern-explicit, pattern-implicit and pattern-rle decode to identical pixel arrays",
+        np.array_equal(explicit, implicit) and np.array_equal(explicit, rle),
+    )
+
+    signed_ds = pydicom.dcmread(str(directory / "pattern-signed.dcm"))
+    signed = signed_ds.pixel_array.astype("<i2")
+    ok(
+        "the signed variant's values run -2048 to 2047 and PixelRepresentation is 1",
+        int(signed.min()) == -2048
+        and int(signed.max()) == 2047
+        and int(signed_ds.PixelRepresentation) == 1
+        and sorted(signed.flatten().tolist()) == list(range(-2048, 2048)),
+    )
+
+    mono1_ds = pydicom.dcmread(str(directory / "pattern-mono1.dcm"))
+    mono1 = mono1_ds.pixel_array.astype("<u2")
+    ok(
+        "the MONOCHROME1 variant's pixels are identical to pattern-explicit's; only the photometric interpretation differs",
+        np.array_equal(mono1, explicit) and str(mono1_ds.PhotometricInterpretation) == "MONOCHROME1",
+    )
+
+    for f in manifest["files"]:
+        ds = pydicom.dcmread(str(directory / f["file"]))
+        text = str(ds)
+        if "(7fe0, 0010)" not in text.lower():
+            raise SystemExit(f"{f['file']}: pydicom's dump shows no pixel data")
+    ok("every file reads as valid DICOM through pydicom's own dump", True)
+
+    burned_ds = pydicom.dcmread(str(directory / "burned-in.dcm"))
+    burned_arr = burned_ds.pixel_array.astype("<u2")
+    bb = manifest["files"][-1]["burnedInAnnotation"]["boundingBox"]
+    mask = np.zeros_like(burned_arr, dtype=bool)
+    mask[bb["rowStart"]:bb["rowEnd"], bb["colStart"]:bb["colEnd"]] = True
+    ok(
+        "burned-in.dcm declares NO, and the text bounding box contains maximum-value pixels while the region outside does not",
+        str(burned_ds.BurnedInAnnotation) == "NO"
+        and bool((burned_arr[mask] == BURNED_IN_MAX).any())
+        and not bool((burned_arr[~mask] == BURNED_IN_MAX).any()),
+    )
+
+    # Re-derive from the bytes on disk a second time, independent of build_pixels_manifest's own
+    # pass, so a corrupted round-trip (not a formula error - section 7 is the check for that) would
+    # show up as a mismatch here rather than being silently trusted.
+    mismatches: List[str] = []
+    for f in manifest["files"]:
+        if "expectedOutput" not in f:
+            continue
+        ds = pydicom.dcmread(str(directory / f["file"]))
+        arr = ds.pixel_array.astype("<i2" if f["pixelRepresentation"] == 1 else "<u2")
+        monochrome1 = f["photometricInterpretation"] == "MONOCHROME1"
+        for window_key, center, width in (("expectedOutput", WINDOW_CENTER, WINDOW_WIDTH), ("expectedOutputSecondWindow", SECOND_WINDOW_CENTER, SECOND_WINDOW_WIDTH)):
+            recomputed = expected_outputs(arr, monochrome1, center, width)
+            if recomputed != f[window_key]:
+                mismatches.append(f"{f['file']}/{window_key}")
+    ok("the eight expected output values per file match what the formula in section 4 produces", not mismatches)
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -1106,6 +1574,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         print(f"wrote {variant_path} ({variant_path.stat().st_size} bytes, sha256 {digest})")
 
     build_series(root)
+    build_pixels(root)
 
 
 if __name__ == "__main__":
