@@ -1,5 +1,6 @@
 import type { Ref } from "react";
 import type { FileResult } from "../lib/parse-many";
+import { identifyingFindings } from "../model/tree";
 
 export type MultiTotals = { selected: number; read: number; notDicom: number; dicomdir: number; failed: number };
 
@@ -57,7 +58,7 @@ function FileRow({ result }: { result: FileResult }) {
   const path = result.relativePath ?? result.name;
   const status =
     result.outcome.kind === "read"
-      ? `${result.outcome.findings} could identify a patient`
+      ? `${identifyingFindings(result.outcome.findings).length} could identify a patient`
       : result.outcome.kind === "skipped"
         ? "skipped"
         : "could not be read";

@@ -2,11 +2,18 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FileResult } from "../lib/parse-many";
+import type { Finding } from "../model/types";
 import { MultiFileList, MultiFileTotals, summariseMany } from "./multi-file-result";
 
 afterEach(cleanup);
 
-const read = (findings: number): FileResult => ({ name: "a", outcome: { kind: "read", findings } });
+// One synthetic identifying finding per count: findings are read via a full ParseOutcome now, not a
+// bare number, but every test here only ever needs the count `identifyingFindings` would report.
+function findingsOfCount(n: number): Finding[] {
+  return Array.from({ length: n }, (_, i) => ({ path: `path-${i}`, tag: "00100010", vr: "PN", kind: "annex-e" }));
+}
+
+const read = (findings: number): FileResult => ({ name: "a", outcome: { kind: "read", nodes: [], findings: findingsOfCount(findings) } });
 const skipped = (reason: "not-dicom" | "dicomdir"): FileResult => ({ name: "a", outcome: { kind: "skipped", reason } });
 const failed = (message: string): FileResult => ({ name: "a", outcome: { kind: "failed", message } });
 
@@ -66,7 +73,7 @@ describe("MultiFileTotals", () => {
 describe("MultiFileList", () => {
   it("shows one row per file, in the given order, with its relative path when there is one", () => {
     const results: FileResult[] = [
-      { name: "IM_0001", relativePath: "A/IM_0001", outcome: { kind: "read", findings: 12 } },
+      { name: "IM_0001", relativePath: "A/IM_0001", outcome: { kind: "read", nodes: [], findings: findingsOfCount(12) } },
       { name: "README.txt", outcome: { kind: "skipped", reason: "not-dicom" } },
     ];
     render(<MultiFileList results={results} />);

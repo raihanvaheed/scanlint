@@ -1,4 +1,4 @@
-import { identifyingFindings } from "../model/tree";
+import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
 import { hasDicomMagic, isDicomDir } from "./dicom-detect";
 
@@ -11,8 +11,11 @@ export type FileSource = {
   read: () => Promise<ArrayBuffer>;
 };
 
+// The parsed tree and findings are kept, not reduced to a count: the plan's own memory decision
+// (a slice is roughly 25 KB of parsed JSON; hundreds of them are affordable) is what lets 2.5 group
+// a folder into series and drill into any one slice without re-parsing it.
 export type FileOutcome =
-  | { kind: "read"; findings: number }
+  | { kind: "read"; nodes: TagNode[]; findings: Finding[] }
   | { kind: "skipped"; reason: "not-dicom" | "dicomdir" }
   | { kind: "failed"; message: string };
 
@@ -62,7 +65,7 @@ async function classify(file: FileSource, parse: ParseManyOptions["parse"]): Pro
   }
   if (!outcome.ok) return { kind: "failed", message: outcome.message };
   if (isDicomDir(outcome.nodes)) return { kind: "skipped", reason: "dicomdir" };
-  return { kind: "read", findings: identifyingFindings(outcome.findings).length };
+  return { kind: "read", nodes: outcome.nodes, findings: outcome.findings };
 }
 
 /**

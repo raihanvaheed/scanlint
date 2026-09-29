@@ -39,6 +39,12 @@ const DICOMDIR_OUTCOME: ParseOutcome = {
   findings: [],
 };
 
+// A shared study/series UID on every fake file: these tests are about selection, drag-and-drop and
+// progress mechanics, not grouping, so every multi-file run here forms one ordinary series rather
+// than exercising 2.5's ungrouped case incidentally.
+const STUDY_UID = "1.2.3";
+const SERIES_UID = "1.2.3.4";
+
 function readOutcome(findingCount: number): ParseOutcome {
   const findings = Array.from({ length: findingCount }, (_, i) => ({
     path: `0010001${i}`,
@@ -47,7 +53,15 @@ function readOutcome(findingCount: number): ParseOutcome {
     kind: "annex-e" as const,
     action: "Z",
   }));
-  return { ok: true, nodes: [{ tag: "00080060", path: "00080060", vr: "CS" }], findings };
+  return {
+    ok: true,
+    nodes: [
+      { tag: "00080060", path: "00080060", vr: "CS" },
+      { tag: "0020000d", path: "0020000d", vr: "UI", value: STUDY_UID },
+      { tag: "0020000e", path: "0020000e", vr: "UI", value: SERIES_UID },
+    ],
+    findings,
+  };
 }
 
 function fakeParse() {
@@ -94,7 +108,7 @@ async function uploadFiles(user: ReturnType<typeof userEvent.setup>, label: stri
 }
 
 describe("multi-select input", () => {
-  it("produces one row per selected file, and the expected totals", async () => {
+  it("produces the series answer with the expected totals, once more than one file is read", async () => {
     const { user } = setup();
     await uploadFiles(user, "or choose files", [
       dicomFile("IM_0001", "READ2"),
@@ -102,19 +116,23 @@ describe("multi-select input", () => {
       notDicomFile("README.txt"),
     ]);
 
-    expect(await screen.findByText("3 files selected")).toBeTruthy();
-    expect(screen.getByText("2 DICOM files read")).toBeTruthy();
+    // Two real files, sharing one series UID, plus a skipped non-DICOM file.
+    const headline = (await screen.findByText("2 files read across 1 series")).closest("ul") as HTMLElement;
     expect(screen.getByText("1 skipped, not DICOM")).toBeTruthy();
     expect(screen.queryByText(/DICOMDIR/)).toBeNull();
     expect(screen.queryByText(/could not be read/)).toBeNull();
 
-    const fileList = screen.getByRole("heading", { name: "Files" }).closest("section") as HTMLElement;
-    const rows = within(fileList).getAllByRole("listitem");
-    expect(rows).toHaveLength(3);
+    // The union of both files' findings: two distinct paths, each on only one of the two files.
+    expect(within(headline).getByText("2 fields could identify a patient")).toBeTruthy();
+    expect(within(headline).getByText("2 identifying fields are not the same on every file")).toBeTruthy();
+
+    const slices = screen.getByText("Slices (2)").closest("details") as HTMLElement;
+    const rows = within(slices).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toContain("IM_0001");
-    expect(rows[0].textContent).toContain("2 could identify a patient");
-    expect(rows[2].textContent).toContain("README.txt");
-    expect(rows[2].textContent).toContain("skipped");
+    expect(rows[0].textContent).toContain("2 fields could identify a patient");
+    expect(rows[1].textContent).toContain("IM_0002");
+    expect(rows[1].textContent).toContain("0 fields could identify a patient");
   });
 
   it("still lands on the single-file screen when exactly one file is chosen", async () => {
@@ -146,7 +164,7 @@ describe("folder picker input", () => {
     ];
     await uploadFiles(user, "or choose a folder", files);
 
-    expect(await screen.findByText("2 files selected")).toBeTruthy();
+    expect(await screen.findByText("2 files read across 1 series")).toBeTruthy();
     expect(screen.getByText("series/IM_0001")).toBeTruthy();
     expect(screen.getByText("series/IM_0002")).toBeTruthy();
   });
@@ -184,7 +202,7 @@ describe("folder drag-and-drop", () => {
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.drop(dropZone, { dataTransfer });
 
-    expect(await screen.findByText("2 files selected")).toBeTruthy();
+    expect(await screen.findByText("2 files read across 1 series")).toBeTruthy();
     expect(screen.getByText("series/IM_0001")).toBeTruthy();
     expect(screen.getByText("series/nested/IM_0002")).toBeTruthy();
   });
@@ -212,7 +230,7 @@ describe("folder drag-and-drop", () => {
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.drop(dropZone, { dataTransfer: { files, items: [] } });
 
-    expect(await screen.findByText("2 files selected")).toBeTruthy();
+    expect(await screen.findByText("2 files read across 1 series")).toBeTruthy();
   });
 });
 
@@ -228,8 +246,7 @@ describe("a drag whose items expose webkitGetAsEntry but it returns null for eve
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.drop(dropZone, { dataTransfer: { items, files } });
 
-    expect(await screen.findByText("2 files selected")).toBeTruthy();
-    expect(screen.getByText("2 DICOM files read")).toBeTruthy();
+    expect(await screen.findByText("2 files read across 1 series")).toBeTruthy();
   });
 });
 
@@ -263,7 +280,7 @@ describe("progress, cancellation and the live region", () => {
     // "loading-many" is reached before any file resolves; the live region got the start sentence.
     expect(live.textContent).toContain("Reading 3 files");
 
-    await screen.findByText("3 files selected");
+    await screen.findByText("3 files read across 1 series");
   });
 
   it("shows N of M outside the live region while running, and the finished totals inside it", async () => {
@@ -277,8 +294,8 @@ describe("progress, cancellation and the live region", () => {
     expect(within(live).queryByText(/of 2 files read/)).toBeNull();
 
     await upload;
-    await screen.findByText("2 files selected");
-    expect(live.textContent).toContain("2 files selected");
+    await screen.findByText("2 files read across 1 series");
+    expect(live.textContent).toContain("2 files read across 1 series");
   });
 
   it("passes its concurrency prop through: two files are genuinely in flight at once with concurrency 2", async () => {
@@ -292,8 +309,7 @@ describe("progress, cancellation and the live region", () => {
     resolveNext(0);
     await run;
 
-    expect(await screen.findByText("3 files selected")).toBeTruthy();
-    expect(screen.getByText("3 DICOM files read")).toBeTruthy();
+    expect(await screen.findByText("3 files read across 1 series")).toBeTruthy();
   });
 
   it("Cancel stops the run, shows partial results, and Load another returns to idle", async () => {
@@ -338,8 +354,7 @@ describe("progress, cancellation and the live region", () => {
     resolveNext(0);
     await secondRun;
 
-    expect(await screen.findByText("2 files selected")).toBeTruthy();
-    expect(screen.getByText("2 DICOM files read")).toBeTruthy();
+    expect(await screen.findByText("2 files read across 1 series")).toBeTruthy();
     expect(screen.queryByText(/Cancelled/)).toBeNull();
   });
 });

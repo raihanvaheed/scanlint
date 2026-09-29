@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { identifyingFindings } from "../model/tree";
 import type { ParseOutcome } from "../parse/protocol";
 import { parseMany } from "./parse-many";
 import type { FileSource } from "./parse-many";
@@ -58,12 +59,14 @@ describe("filtering", () => {
     if (result.outcome.kind === "failed") expect(result.outcome.message.length).toBeGreaterThan(0);
   });
 
-  it("reads all 15 fixture slices", async () => {
+  it("reads all 15 fixture slices, keeping each one's full parsed tree and findings", async () => {
     const results = await parseMany(SLICE_NAMES.map(fixtureSource), { concurrency: 4, parse: REAL_PARSE });
     expect(results).toHaveLength(15);
     expect(results.every((r) => r.outcome.kind === "read")).toBe(true);
     const a3 = results.find((r) => r.name === "IM_0011"); // A-3: the extra ReferringPhysicianName
-    expect(a3?.outcome).toEqual({ kind: "read", findings: 29 });
+    if (a3?.outcome.kind !== "read") throw new Error("expected IM_0011 to be read");
+    expect(identifyingFindings(a3.outcome.findings)).toHaveLength(29);
+    expect(a3.outcome.nodes.length).toBeGreaterThan(0);
   });
 });
 

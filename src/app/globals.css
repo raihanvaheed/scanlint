@@ -1,4 +1,13 @@
-@import "tailwindcss";
+/* An allowlist, not a blocklist: only these two directories genuinely contain classes, so only
+   they are scanned. `source(none)` turns off Tailwind's automatic whole-project detection, which is
+   what let a domain string elsewhere in the source tree collide with a utility name (".grow" in 1.5,
+   19 stray CSS bytes with no stylesheet change in 2.4) - scanning less rather than blocking more.
+   The test-file exclusion is not fully redundant: components/*.test.tsx sits inside the allowed
+   directory and its string literals (asserting a class is absent, e.g. `.not.toContain("border-rule")`)
+   would otherwise be read as usage, reintroducing the same kind of collision one directory down. */
+@import "tailwindcss" source(none);
+@source "../app";
+@source "../components";
 @source not "../**/*.test.ts";
 @source not "../**/*.test.tsx";
 
