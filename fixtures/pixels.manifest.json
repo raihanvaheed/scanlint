@@ -1,0 +1,719 @@
+{
+  "manifestVersion": 1,
+  "generator": "scripts/make-sample-study.py",
+  "pathFormat": "tag segments are 8 lowercase hex chars; sequence item segments are zero-based indices; segments joined by /",
+  "directory": "fixtures/pixels",
+  "patternFormula": {
+    "unsigned": "value = y * 64 + x, for y, x each in [0, 64) - every 12-bit value 0..4095 exactly once",
+    "signed": "value = y * 64 + x - 2048, for y, x each in [0, 64) - every value -2048..2047 exactly once",
+    "coordinateConvention": "(x, y): x is the column, y is the row; pixels[y][x] holds the stored value"
+  },
+  "windowingFormula": {
+    "standard": "PS3.3 C.11.2.1.2, the default LINEAR VOI LUT function",
+    "formula": "x is the value after rescale (x = stored * RescaleSlope + RescaleIntercept), c is WindowCenter, w is WindowWidth. If x <= c - 0.5 - (w-1)/2, y = 0. Else if x > c - 0.5 + (w-1)/2, y = 255. Else y = ((x - (c - 0.5)) / (w - 1) + 0.5) * 255, rounded to the nearest integer and clamped to 0-255. MONOCHROME1 then applies y = 255 - y, after windowing, never before."
+  },
+  "window": {
+    "center": 0,
+    "width": 400,
+    "note": "narrow: clips almost every value to black or white"
+  },
+  "secondWindow": {
+    "center": 3071,
+    "width": 8190,
+    "note": "full range: ramps almost every value"
+  },
+  "files": [
+    {
+      "file": "pattern-explicit.dcm",
+      "sha256": "ea6f9f4615cde0bbbad2527e1114a26003175a41f4e3477418dd1584dd172860",
+      "transferSyntaxUid": "1.2.840.10008.1.2.1",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 16,
+      "bitsStored": 12,
+      "highBit": 11,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME2",
+      "rescaleSlope": 2,
+      "rescaleIntercept": -1024,
+      "windowCenter": 0,
+      "windowWidth": 400,
+      "pixelArraySha256": "8500f04e6b29f9697ab60beb608e81ed0022a0613bc1d636e494029307697d08",
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": 0,
+          "rescaled": -1024,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": 63,
+          "rescaled": -898,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 4032,
+          "rescaled": 7040,
+          "grey": 255
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 4095,
+          "rescaled": 7166,
+          "grey": 255
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 2080,
+          "rescaled": 3136,
+          "grey": 255
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": 448,
+          "rescaled": -128,
+          "grey": 46
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": 544,
+          "rescaled": 64,
+          "grey": 169
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": 576,
+          "rescaled": 128,
+          "grey": 210
+        }
+      ],
+      "expectedOutputSecondWindow": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": 0,
+          "rescaled": -1024,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": 63,
+          "rescaled": -898,
+          "grey": 4
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 4032,
+          "rescaled": 7040,
+          "grey": 251
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 4095,
+          "rescaled": 7166,
+          "grey": 255
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 2080,
+          "rescaled": 3136,
+          "grey": 130
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": 448,
+          "rescaled": -128,
+          "grey": 28
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": 544,
+          "rescaled": 64,
+          "grey": 34
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": 576,
+          "rescaled": 128,
+          "grey": 36
+        }
+      ]
+    },
+    {
+      "file": "pattern-implicit.dcm",
+      "sha256": "b2aa48fd1b0cc64c3d27c4d3cc4717acd460b3d94adffd6533c152220b4663c8",
+      "transferSyntaxUid": "1.2.840.10008.1.2",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 16,
+      "bitsStored": 12,
+      "highBit": 11,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME2",
+      "rescaleSlope": 2,
+      "rescaleIntercept": -1024,
+      "windowCenter": 0,
+      "windowWidth": 400,
+      "pixelArraySha256": "8500f04e6b29f9697ab60beb608e81ed0022a0613bc1d636e494029307697d08",
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": 0,
+          "rescaled": -1024,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": 63,
+          "rescaled": -898,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 4032,
+          "rescaled": 7040,
+          "grey": 255
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 4095,
+          "rescaled": 7166,
+          "grey": 255
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 2080,
+          "rescaled": 3136,
+          "grey": 255
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": 448,
+          "rescaled": -128,
+          "grey": 46
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": 544,
+          "rescaled": 64,
+          "grey": 169
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": 576,
+          "rescaled": 128,
+          "grey": 210
+        }
+      ],
+      "expectedOutputSecondWindow": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": 0,
+          "rescaled": -1024,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": 63,
+          "rescaled": -898,
+          "grey": 4
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 4032,
+          "rescaled": 7040,
+          "grey": 251
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 4095,
+          "rescaled": 7166,
+          "grey": 255
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 2080,
+          "rescaled": 3136,
+          "grey": 130
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": 448,
+          "rescaled": -128,
+          "grey": 28
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": 544,
+          "rescaled": 64,
+          "grey": 34
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": 576,
+          "rescaled": 128,
+          "grey": 36
+        }
+      ]
+    },
+    {
+      "file": "pattern-rle.dcm",
+      "sha256": "1edf21228efad3b9760444f6f3693c90ea6fa18403018ebdccc5e784e6754a52",
+      "transferSyntaxUid": "1.2.840.10008.1.2.5",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 16,
+      "bitsStored": 12,
+      "highBit": 11,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME2",
+      "rescaleSlope": 2,
+      "rescaleIntercept": -1024,
+      "windowCenter": 0,
+      "windowWidth": 400,
+      "pixelArraySha256": "8500f04e6b29f9697ab60beb608e81ed0022a0613bc1d636e494029307697d08",
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": 0,
+          "rescaled": -1024,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": 63,
+          "rescaled": -898,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 4032,
+          "rescaled": 7040,
+          "grey": 255
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 4095,
+          "rescaled": 7166,
+          "grey": 255
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 2080,
+          "rescaled": 3136,
+          "grey": 255
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": 448,
+          "rescaled": -128,
+          "grey": 46
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": 544,
+          "rescaled": 64,
+          "grey": 169
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": 576,
+          "rescaled": 128,
+          "grey": 210
+        }
+      ],
+      "expectedOutputSecondWindow": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": 0,
+          "rescaled": -1024,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": 63,
+          "rescaled": -898,
+          "grey": 4
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 4032,
+          "rescaled": 7040,
+          "grey": 251
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 4095,
+          "rescaled": 7166,
+          "grey": 255
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 2080,
+          "rescaled": 3136,
+          "grey": 130
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": 448,
+          "rescaled": -128,
+          "grey": 28
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": 544,
+          "rescaled": 64,
+          "grey": 34
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": 576,
+          "rescaled": 128,
+          "grey": 36
+        }
+      ]
+    },
+    {
+      "file": "pattern-mono1.dcm",
+      "sha256": "4f28a542fc0d95ab27bdd1b4b4b378a524c67f67e916824653e3bdf2c1f9e438",
+      "transferSyntaxUid": "1.2.840.10008.1.2.1",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 16,
+      "bitsStored": 12,
+      "highBit": 11,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME1",
+      "rescaleSlope": 2,
+      "rescaleIntercept": -1024,
+      "windowCenter": 0,
+      "windowWidth": 400,
+      "pixelArraySha256": "8500f04e6b29f9697ab60beb608e81ed0022a0613bc1d636e494029307697d08",
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": 0,
+          "rescaled": -1024,
+          "grey": 255
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": 63,
+          "rescaled": -898,
+          "grey": 255
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 4032,
+          "rescaled": 7040,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 4095,
+          "rescaled": 7166,
+          "grey": 0
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 2080,
+          "rescaled": 3136,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": 448,
+          "rescaled": -128,
+          "grey": 209
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": 544,
+          "rescaled": 64,
+          "grey": 86
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": 576,
+          "rescaled": 128,
+          "grey": 45
+        }
+      ],
+      "expectedOutputSecondWindow": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": 0,
+          "rescaled": -1024,
+          "grey": 255
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": 63,
+          "rescaled": -898,
+          "grey": 251
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 4032,
+          "rescaled": 7040,
+          "grey": 4
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 4095,
+          "rescaled": 7166,
+          "grey": 0
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 2080,
+          "rescaled": 3136,
+          "grey": 125
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": 448,
+          "rescaled": -128,
+          "grey": 227
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": 544,
+          "rescaled": 64,
+          "grey": 221
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": 576,
+          "rescaled": 128,
+          "grey": 219
+        }
+      ]
+    },
+    {
+      "file": "pattern-signed.dcm",
+      "sha256": "095589bdc86c3a408c56c16c2f7843e0dc64d99fec42d99218972ff2c8cefff3",
+      "transferSyntaxUid": "1.2.840.10008.1.2.1",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 16,
+      "bitsStored": 12,
+      "highBit": 11,
+      "pixelRepresentation": 1,
+      "photometricInterpretation": "MONOCHROME2",
+      "rescaleSlope": 2,
+      "rescaleIntercept": -1024,
+      "windowCenter": 0,
+      "windowWidth": 400,
+      "pixelArraySha256": "4d03c1071bbb0168f05cfdcf859053a7bfe695a3204039925404b9037f51395c",
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": -2048,
+          "rescaled": -5120,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": -1985,
+          "rescaled": -4994,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 1984,
+          "rescaled": 2944,
+          "grey": 255
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 2047,
+          "rescaled": 3070,
+          "grey": 255
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 32,
+          "rescaled": -960,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": -1600,
+          "rescaled": -4224,
+          "grey": 0
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": -1504,
+          "rescaled": -4032,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": -1472,
+          "rescaled": -3968,
+          "grey": 0
+        }
+      ],
+      "expectedOutputSecondWindow": [
+        {
+          "x": 0,
+          "y": 0,
+          "stored": -2048,
+          "rescaled": -5120,
+          "grey": 0
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "stored": -1985,
+          "rescaled": -4994,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "stored": 1984,
+          "rescaled": 2944,
+          "grey": 124
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "stored": 2047,
+          "rescaled": 3070,
+          "grey": 127
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "stored": 32,
+          "rescaled": -960,
+          "grey": 2
+        },
+        {
+          "x": 0,
+          "y": 7,
+          "stored": -1600,
+          "rescaled": -4224,
+          "grey": 0
+        },
+        {
+          "x": 32,
+          "y": 8,
+          "stored": -1504,
+          "rescaled": -4032,
+          "grey": 0
+        },
+        {
+          "x": 0,
+          "y": 9,
+          "stored": -1472,
+          "rescaled": -3968,
+          "grey": 0
+        }
+      ]
+    },
+    {
+      "file": "burned-in.dcm",
+      "sha256": "7e27dd327c608e42fad3c7ff26938addde3c022c31107f41c2ee8b9e32d38a42",
+      "transferSyntaxUid": "1.2.840.10008.1.2.1",
+      "rows": 128,
+      "columns": 128,
+      "bitsAllocated": 16,
+      "bitsStored": 12,
+      "highBit": 11,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME2",
+      "pixelArraySha256": "d0a14c27d251b08a752bdea6ae5355ccf8a195d3a265186fffc3ba69ad4215a3",
+      "burnedInAnnotation": {
+        "declared": "NO",
+        "deliberatelyFalse": true,
+        "note": "The declaration is deliberately false: the pixels contain the legible text 'TESTPATIENT' while the metadata declares no burned-in annotation. This is Stage 3's demonstration case for the preview - proof that a clean declaration is not proof of clean pixels - and is not a generator bug.",
+        "text": "TESTPATIENT",
+        "boundingBox": {
+          "rowStart": 58,
+          "colStart": 20,
+          "rowEnd": 70,
+          "colEnd": 108
+        },
+        "textValue": 4095,
+        "backgroundValue": 2048
+      }
+    }
+  ]
+}
