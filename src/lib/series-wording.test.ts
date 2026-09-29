@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IDENTIFYING_KINDS, STRUCTURAL_KINDS, wordFinding } from "./series-wording";
+import { formatFileList, IDENTIFYING_KINDS, STRUCTURAL_KINDS, wordFinding } from "./series-wording";
 import type { SeriesFinding } from "../rules/series";
 
 const base = { scope: "series" as const, seriesInstanceUid: "1.1" };
@@ -50,19 +50,29 @@ describe("wordFinding: section 6's table, verbatim", () => {
     expect(wordFinding(finding).text).toBe("Slices in this series belong to different studies");
   });
 
-  it("mixed-modality at series scope", () => {
-    const finding: SeriesFinding = { ...base, kind: "mixed-modality", modalities: { CT: ["a"], MR: ["b"] } };
-    expect(wordFinding(finding).text).toBe("This series contains a file from a different kind of scan");
+  it("mixed-modality at series scope: names the minority and majority modalities, and lists only the minority files", () => {
+    const finding: SeriesFinding = { ...base, kind: "mixed-modality", modalities: { CT: ["a", "b", "c", "d"], MR: ["e"] } };
+    const worded = wordFinding(finding);
+    expect(worded.text).toBe("This series contains 1 file from a different kind of scan — MR among CT");
+    expect(worded.files).toEqual(["e"]);
   });
 
-  it("mixed-modality at folder scope", () => {
-    const finding: SeriesFinding = { kind: "mixed-modality", scope: "folder", modalities: { CT: ["a"], MR: ["b"] } };
-    expect(wordFinding(finding).text).toBe("This folder holds more than one kind of scan");
+  it("mixed-modality at series scope: pluralises the minority count correctly", () => {
+    const finding: SeriesFinding = { ...base, kind: "mixed-modality", modalities: { CT: ["a", "b", "c"], MR: ["d", "e"] } };
+    expect(wordFinding(finding).text).toBe("This series contains 2 files from a different kind of scan — MR among CT");
   });
 
-  it("derives files from `modalities` when `files` is absent, for mixed-modality", () => {
-    const finding: SeriesFinding = { kind: "mixed-modality", scope: "folder", modalities: { CT: ["a", "b"], MR: ["c"] } };
-    expect(wordFinding(finding).files.sort()).toEqual(["a", "b", "c"]);
+  it("mixed-modality at folder scope: names every modality with its own count, and lists no files at all", () => {
+    const finding: SeriesFinding = { kind: "mixed-modality", scope: "folder", modalities: { CT: ["a", "b", "c", "d"], MR: ["e"] } };
+    const worded = wordFinding(finding);
+    expect(worded.text).toBe("This folder holds more than one kind of scan — CT (4 files), MR (1 file)");
+    expect(worded.files).toEqual([]);
+  });
+
+  it("mixed-modality: breaks a tied majority alphabetically, deterministic regardless of key order", () => {
+    const finding: SeriesFinding = { ...base, kind: "mixed-modality", modalities: { MR: ["a"], CT: ["b"] } };
+    // CT < MR alphabetically, so CT is the majority even though MR was listed first.
+    expect(wordFinding(finding).text).toBe("This series contains 1 file from a different kind of scan — MR among CT");
   });
 
   it("passes through a nested finding's canonical path, as Stage 1 does", () => {
@@ -73,6 +83,23 @@ describe("wordFinding: section 6's table, verbatim", () => {
   it("has no path for a structural finding", () => {
     const finding: SeriesFinding = { ...base, kind: "duplicate-position", files: ["a", "b"] };
     expect(wordFinding(finding).path).toBeUndefined();
+  });
+});
+
+describe("formatFileList", () => {
+  it("lists every name when there are five or fewer", () => {
+    expect(formatFileList(["a", "b", "c"])).toBe("a, b, c");
+    expect(formatFileList(["a", "b", "c", "d", "e"])).toBe("a, b, c, d, e");
+  });
+
+  it("lists the first five, then how many more, for a finding affecting 40 files", () => {
+    const files = Array.from({ length: 40 }, (_, i) => `IM_${String(i + 1).padStart(4, "0")}`);
+    expect(formatFileList(files)).toBe("IM_0001, IM_0002, IM_0003, IM_0004, IM_0005, and 35 more");
+  });
+
+  it("truncates at exactly six", () => {
+    const files = ["a", "b", "c", "d", "e", "f"];
+    expect(formatFileList(files)).toBe("a, b, c, d, e, and 1 more");
   });
 });
 

@@ -20,8 +20,21 @@ function formatMm(n: number): string {
   return `${Math.round(n * 1000) / 1000}`;
 }
 
-function plural(n: number, word: string): string {
+export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+const FILE_LIST_LIMIT = 5;
+
+/**
+ * A finding's file list, for both the screen and the report: up to five names, then how many more.
+ * A duplicated position or a mixed-modality series can affect dozens of files at real-world scale
+ * (2.5's own 760-file check found a 40-name line), which is readable but not something a line of
+ * text should have to be. Fixed once, here, so neither surface can drift from the other.
+ */
+export function formatFileList(files: string[]): string {
+  if (files.length <= FILE_LIST_LIMIT) return files.join(", ");
+  return `${files.slice(0, FILE_LIST_LIMIT).join(", ")}, and ${files.length - FILE_LIST_LIMIT} more`;
 }
 
 /**
@@ -53,11 +66,26 @@ export function wordFinding(finding: SeriesFinding, context: { totalInSeries?: n
       return { text: "Slices in this series are not all in the same plane", files };
     case "inconsistent-identifier":
       return { text: "Slices in this series belong to different studies", files };
-    case "mixed-modality":
+    case "mixed-modality": {
+      // The majority is whichever modality has the most files (ties broken alphabetically, for the
+      // same order-independence reason as everywhere else); everything else is the minority that
+      // actually caused the finding, and is what gets named and listed - not the whole series.
+      const entries = Object.entries(finding.modalities ?? {}).sort(([am, af], [bm, bf]) => bf.length - af.length || (am < bm ? -1 : 1));
+      const [majorityModality] = entries[0] ?? ["", []];
+      const minorityEntries = entries.slice(1);
+      const minorityFiles = minorityEntries.flatMap(([, fileNames]) => fileNames);
+
+      if (finding.scope === "folder") {
+        const summary = entries.map(([modality, fileNames]) => `${modality} (${plural(fileNames.length, "file")})`).join(", ");
+        return { text: `This folder holds more than one kind of scan — ${summary}`, files: [] };
+      }
+
+      const minorityLabel = minorityEntries.map(([modality]) => modality).join(" and ");
       return {
-        text: finding.scope === "folder" ? "This folder holds more than one kind of scan" : "This series contains a file from a different kind of scan",
-        files,
+        text: `This series contains ${plural(minorityFiles.length, "file")} from a different kind of scan — ${minorityLabel} among ${majorityModality}`,
+        files: minorityFiles,
       };
+    }
     default: {
       const exhaustive: never = finding.kind;
       throw new Error(`No wording for finding kind "${exhaustive}"`);

@@ -69,6 +69,12 @@ describe("against the fixture: headline counts", () => {
     rerender(<SeriesHeader report={fixtureReport} skipFail={{ notDicom: 0, dicomdir: 0, failed: 0 }} />);
     expect(screen.getByText("15 files")).toBeTruthy();
   });
+
+  it("2.6a: reports burned-in annotation right after the four headline lines, with Stage 1's caveat", () => {
+    render(<SeriesHeader report={fixtureReport} skipFail={{ notDicom: 0, dicomdir: 0, failed: 0 }} />);
+    expect(screen.getByText("All 15 files declare burned-in annotation: YES")).toBeTruthy();
+    expect(screen.getByText("ScanLint reports what this field says. It cannot see text printed into the image itself.")).toBeTruthy();
+  });
 });
 
 describe("against the fixture: aggregated identifying fields", () => {
@@ -122,6 +128,13 @@ describe("against the fixture: Not consistent list reads the same as the series 
     expect(rows).toHaveLength(2); // the top-level tag and the one nested in the sequence
     expect(within(notConsistent).queryByText(/appears on 1 of 1 files only/)).toBeNull();
   });
+
+  it("2.6a: the two findings are distinguishable by canonical path, the top-level one included", () => {
+    renderBody(fixtureGrouping, fixtureFindings, fixtureParsed, fixtureReport);
+    const notConsistent = screen.getByText("Not consistent across files (4)").closest("details") as HTMLElement;
+    expect(within(notConsistent).getByText("00080090")).toBeTruthy();
+    expect(within(notConsistent).getByText("04000561/0/04000550/0/00080090")).toBeTruthy();
+  });
 });
 
 describe("against the fixture: sections", () => {
@@ -139,6 +152,16 @@ describe("against the fixture: sections", () => {
     renderBody(fixtureGrouping, [], fixtureParsed, buildSeriesReport(fixtureGrouping, [], []));
     expect(screen.queryByText(/Not consistent across files/)).toBeNull();
     expect(screen.queryByText(/Structural inconsistencies/)).toBeNull();
+  });
+
+  it("truncates a finding's file list on screen, same as the report will", () => {
+    const manyFiles = Array.from({ length: 40 }, (_, i) => `IM_${String(i + 1).padStart(4, "0")}`);
+    const seriesUid = fixtureGrouping.studies[0].series[0].seriesInstanceUid!;
+    const findings: SeriesFinding[] = [{ kind: "duplicate-position", scope: "series", seriesInstanceUid: seriesUid, files: manyFiles }];
+    renderBody(fixtureGrouping, findings, fixtureParsed, buildSeriesReport(fixtureGrouping, findings, []));
+    // Appears twice: once in the folder-wide "Structural inconsistencies" list, once inside the
+    // series' own block - both must be truncated the same way.
+    expect(screen.getAllByText(/, and \d+ more$/).length).toBeGreaterThan(0);
   });
 });
 

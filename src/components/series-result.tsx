@@ -2,10 +2,10 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Ref } from "react";
-import { seriesNumberOf } from "../lib/series-report";
+import { headlineLines, seriesNumberOf } from "../lib/series-report";
 import type { ParsedFile, SeriesReport } from "../lib/series-report";
 import type { AggregatedField } from "../lib/series-aggregate";
-import { wordFinding } from "../lib/series-wording";
+import { formatFileList, plural, wordFinding } from "../lib/series-wording";
 import { formatTag } from "../model/tag";
 import { identifyingFindings } from "../model/tree";
 import type { Finding } from "../model/types";
@@ -15,9 +15,7 @@ import { Reason } from "./findings-list";
 import { FieldValue, useReveal } from "./field-value";
 import type { Reveal } from "./field-value";
 import { FOCUS_RING, FOCUS_RING_WITHIN } from "./focus";
-import { SingleFileResult } from "./single-file-result";
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+import { BURNED_IN_CAVEAT, SingleFileResult } from "./single-file-result";
 
 /** Files this run didn't end up reading as part of any series - still worth a line each, exactly as
  * 2.2's flat-list totals said, so replacing that list with the series answer never silently drops
@@ -49,15 +47,12 @@ export function SeriesHeader({
         {folderName ?? plural(report.totalRead, "file")}
       </h2>
       <ul className="mt-4 space-y-1 text-2xl font-semibold text-ink">
-        <li>{`${plural(report.totalRead, "file")} read across ${report.seriesCount} series`}</li>
-        <li>{`${plural(report.aggregatedFields.length, "field")} could identify a patient`}</li>
-        {report.notConsistentFindings.length > 0 && (
-          <li>{`${report.notConsistentFindings.length} identifying field${report.notConsistentFindings.length === 1 ? " is" : "s are"} not the same on every file`}</li>
-        )}
-        {report.structuralFindings.length > 0 && (
-          <li>{`${report.structuralFindings.length} structural inconsistenc${report.structuralFindings.length === 1 ? "y" : "ies"} between files`}</li>
-        )}
+        {headlineLines(report).map((line) => (
+          <li key={line}>{line}</li>
+        ))}
       </ul>
+      <p className="mt-4 text-ink">{report.burnedIn}</p>
+      <p className="mt-1 text-sm text-shade">{BURNED_IN_CAVEAT}</p>
       {(skipFail.notDicom > 0 || skipFail.dicomdir > 0 || skipFail.failed > 0) && (
         <ul className="mt-4 space-y-2 text-ink">
           {skipFail.notDicom > 0 && <li>{`${skipFail.notDicom} skipped, not DICOM`}</li>}
@@ -86,8 +81,10 @@ function InconsistencyRow({ finding, totalInSeries }: { finding: SeriesFinding; 
   return (
     <li className="py-3">
       <p className="text-ink">{text}</p>
-      <p className="mt-1 text-sm text-shade">{files.join(", ")}</p>
-      {path !== undefined && path.includes("/") && <p className="break-all font-mono text-xs text-shade">{path}</p>}
+      {files.length > 0 && <p className="mt-1 text-sm text-shade">{formatFileList(files)}</p>}
+      {/* Shown for every finding that carries one, nested or not: a top-level path is just the tag
+          itself, which disambiguates two same-named findings with no special case for depth. */}
+      {path !== undefined && <p className="break-all font-mono text-xs text-shade">{path}</p>}
     </li>
   );
 }

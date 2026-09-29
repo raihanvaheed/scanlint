@@ -1,0 +1,255 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshot > the full Markdown report for the fixture, with a fixed timestamp 1`] = `
+"# ScanLint report
+
+Checked 2026-01-15 at 14:30 · scanlint.raihanvaheed.dev
+
+## What was checked
+
+- Folder: series
+- 19 files selected
+- 15 DICOM files read
+- 3 skipped, not DICOM
+- 1 skipped, a DICOMDIR
+- 0 could not be read
+- 2 series
+
+## Summary
+
+- 15 files read across 2 series
+- 29 fields could identify a patient
+- 4 identifying fields are not the same on every file
+- 7 structural inconsistencies between files
+
+All 15 files declare burned-in annotation: YES
+
+ScanLint reports what this field says. It cannot see text printed into the image itself.
+
+## Identifying fields (29)
+
+### Media Storage SOP Instance UID
+- Tag: (0002,0003)
+- Action: U — replace with a new UID
+- Present: in all 15 files
+
+### SOP Instance UID
+- Tag: (0008,0018)
+- Action: U — replace with a new UID
+- Present: in all 15 files
+
+### Study Date
+- Tag: (0008,0020)
+- Action: Z — blank, or replace with a dummy
+- Present: in all 15 files
+
+### Study Time
+- Tag: (0008,0030)
+- Action: Z — blank, or replace with a dummy
+- Present: in all 15 files
+
+### Accession Number
+- Tag: (0008,0050)
+- Action: Z — blank, or replace with a dummy
+- Present: in all 15 files
+
+### Institution Name
+- Tag: (0008,0080)
+- Action: X/Z/D — remove, blank, or replace with a dummy
+- Present: in all 15 files
+
+### Institution Address
+- Tag: (0008,0081)
+- Action: X — remove
+- Present: in all 15 files
+
+### Referring Physician's Name
+- Tag: (0008,0090)
+- Action: Z — blank, or replace with a dummy
+- Present: in 1 of 15 files
+
+### Study Description
+- Tag: (0008,1030)
+- Action: X — remove
+- Present: in all 15 files
+
+### Series Description
+- Tag: (0008,103E)
+- Action: X — remove
+- Present: in all 15 files
+- Distinct values: 2
+
+### Performing Physician's Name
+- Tag: (0008,1050)
+- Action: X — remove
+- Present: in all 15 files
+
+### Operators' Name
+- Tag: (0008,1070)
+- Action: X/Z/D — remove, blank, or replace with a dummy
+- Present: in all 15 files
+
+### Patient's Name
+- Tag: (0010,0010)
+- Action: Z — blank, or replace with a dummy
+- Present: in all 15 files
+
+### Patient ID
+- Tag: (0010,0020)
+- Action: Z/D — blank, or a dummy where the field cannot be empty
+- Present: in all 15 files
+- Distinct values: 2
+
+### Patient's Birth Date
+- Tag: (0010,0030)
+- Action: Z — blank, or replace with a dummy
+- Present: in all 15 files
+
+### Patient's Sex
+- Tag: (0010,0040)
+- Action: Z — blank, or replace with a dummy
+- Present: in all 15 files
+
+### Other Patient IDs
+- Tag: (0010,1000)
+- Action: X — remove
+- Present: in all 15 files
+
+### Patient's Address
+- Tag: (0010,1040)
+- Action: X — remove
+- Present: in all 15 files
+
+### Patient's Telephone Numbers
+- Tag: (0010,2154)
+- Action: X — remove
+- Present: in all 15 files
+
+### Study Instance UID
+- Tag: (0020,000D)
+- Action: U — replace with a new UID
+- Present: in all 15 files
+
+### Series Instance UID
+- Tag: (0020,000E)
+- Action: U — replace with a new UID
+- Present: in all 15 files
+- Distinct values: 2
+
+### Study ID
+- Tag: (0020,0010)
+- Action: Z — blank, or replace with a dummy
+- Present: in all 15 files
+
+### Frame of Reference UID
+- Tag: (0020,0052)
+- Action: U — replace with a new UID
+- Present: in all 15 files
+
+### (0029,0010)
+- Tag: (0029,0010)
+- private tag, contents defined by the manufacturer
+- Present: in all 15 files
+
+### (0029,1001)
+- Tag: (0029,1001)
+- private tag, contents defined by the manufacturer
+- Present: in all 15 files
+
+### (0029,1002)
+- Tag: (0029,1002)
+- private tag, contents defined by the manufacturer
+- Present: in all 15 files
+
+### Original Attributes Sequence
+- Tag: (0400,0561)
+- Action: X — remove
+- Present: in all 15 files
+
+### Modified Attributes Sequence
+- Tag: (0400,0550)
+- Path: \`04000561/0/04000550\`
+- Action: X — remove
+- Present: in all 15 files
+
+### Referring Physician's Name
+- Tag: (0008,0090)
+- Path: \`04000561/0/04000550/0/00080090\`
+- Action: Z — blank, or replace with a dummy
+- Present: in 1 of 15 files
+
+## Not consistent across files (4)
+
+### Series 1
+
+- Patient ID is not the same on every file
+  IM_0006
+  \`00100020\`
+
+- Referring Physician's Name appears on 1 of 10 files only
+  IM_0011
+  \`00080090\`
+
+- Referring Physician's Name appears on 1 of 10 files only
+  IM_0011
+  \`04000561/0/04000550/0/00080090\`
+
+### Series 2
+
+- Series Description is not the same on every file
+  IM_0001
+  \`0008103e\`
+
+## Structural inconsistencies (7)
+
+### Series 1
+
+- A slice may be missing — 6 mm between two slices where 3 mm is expected
+  IM_0014, IM_0007
+
+- A slice may be missing — 6 mm between two slices where 3 mm is expected
+  IM_0007, IM_0013
+
+- 1 file has different pixel dimensions from the rest
+  IM_0007
+
+### Series 2
+
+- A slice may be missing — 9 mm between two slices where 5 mm is expected
+  IM_0008, IM_0001
+
+- 1 file has different pixel dimensions from the rest
+  IM_0001
+
+- This series contains 1 file from a different kind of scan — MR among CT
+  IM_0001
+
+### Whole folder
+
+- This folder holds more than one kind of scan — MR (11 files), CT (4 files)
+
+## Series (2)
+
+### Series 1 · MR · 10 slices
+
+Ordered by position
+
+### Series 2 · CT · 5 slices
+
+Ordered by position
+
+## Ungrouped files (0)
+
+None.
+
+## Failed files (0)
+
+None.
+
+## Caveats
+
+ScanLint reads metadata. It cannot see text printed into the image itself; where a file declares burned-in annotation, that declaration is reported above and is unreliable in both directions.
+
+Flagging is not anonymising. This report describes what a de-identification profile would act on. No file has been changed.
+"
+`;
