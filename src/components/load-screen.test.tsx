@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
+import type { DecodeOutcome } from "../pixels/protocol";
 import { LoadScreen } from "./load-screen";
 
 afterEach(cleanup);
@@ -42,8 +43,11 @@ function setup(parseResult: ParseOutcome | Error, loadResult: ArrayBuffer | Erro
   const loadSample = vi.fn<() => Promise<ArrayBuffer>>(() =>
     loadResult instanceof Error ? Promise.reject(loadResult) : Promise.resolve(loadResult),
   );
-  const view = render(<LoadScreen parse={parse} loadSample={loadSample} concurrency={concurrency} />);
-  return { parse, loadSample, user: userEvent.setup(), ...view };
+  // None of this file's tests open the image preview; a fake that is never expected to run is
+  // enough, and failing loudly if that ever changes is better than a silent, unrelated hang.
+  const decodePixels = vi.fn<() => Promise<DecodeOutcome>>(() => Promise.reject(new Error("decodePixels was not expected to be called in this test")));
+  const view = render(<LoadScreen parse={parse} loadSample={loadSample} concurrency={concurrency} decodePixels={decodePixels} />);
+  return { parse, loadSample, decodePixels, user: userEvent.setup(), ...view };
 }
 
 describe("idle", () => {
@@ -462,10 +466,12 @@ describe("skip links", () => {
     }
   });
 
-  it("is the first stop after the filename heading, and Skip to all fields moves focus to the tree heading", async () => {
+  it("is the stop right after Show image (3.4's preview control), and Skip to all fields moves focus to the tree heading", async () => {
     const { user } = await load();
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "single.dcm" }));
 
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Show image" }));
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole("link", { name: "Skip to all fields" }));
     await user.keyboard("{Enter}");

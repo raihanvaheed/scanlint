@@ -111,7 +111,8 @@ describe("decodeImage against the 3.1 manifest", () => {
     expect(entry.windowCenter).toBeUndefined();
     expect(entry.windowWidth).toBeUndefined();
 
-    const { width, height, rgba } = decodeImage(readFixture("burned-in.dcm"));
+    const { width, height, rgba, window } = decodeImage(readFixture("burned-in.dcm"));
+    expect(window).toEqual({ center: 2149.5, width: 3891 }); // (204+4095)/2, 4095-204 - the fallback, over the whole image
     const box = entry.burnedInAnnotation.boundingBox;
 
     let insideSum = 0;
@@ -154,6 +155,10 @@ describe("the hand-worked anchor (pattern-explicit, window center 0 width 400)",
 
   it("(0,7): stored 448, rescaled -128, grey 46", () => {
     expect(greyAt(0, 7)).toBe(46);
+  });
+
+  it("echoes back the window that was actually applied", () => {
+    expect(decodeImage(readFixture("pattern-explicit.dcm"), { window: { center: 0, width: 400 } }).window).toEqual({ center: 0, width: 400 });
   });
 });
 
@@ -350,8 +355,20 @@ describe("decodeImage: constructed edge cases", () => {
       planarConfiguration: 0,
       pixelData: bytes8([10, 20, 30, 200, 150, 100]),
     });
-    const { rgba } = decodeImage(bytes);
+    const { rgba, window } = decodeImage(bytes);
     expect(Array.from(rgba)).toEqual([10, 20, 30, 255, 200, 150, 100, 255]);
+    expect(window).toBeUndefined();
+  });
+
+  // A DICOMDIR or a structured report has neither Rows nor PixelData - "no pixel data" must win
+  // over "missing required attribute Rows", or the message misleads about what's actually wrong.
+  it("a file with no image geometry at all (a DICOMDIR's own shape) says there is no pixel data, not that Rows is missing", () => {
+    const meta = explicitElement(0x0002, 0x0010, "UI", asciiPadded("1.2.840.10008.1.2.1"));
+    // One harmless, unrelated element - a DICOMDIR has plenty of its own tags, just none about an
+    // image - and dicom-parser needs at least one byte of main-dataset content to parse at all.
+    const fileSetId = explicitElement(0x0004, 0x1130, "CS", asciiPadded("SCANLINT"));
+    const bytes = concatBytes([PART10_PREAMBLE, DICM_MAGIC, meta, fileSetId]);
+    expect(() => decodeImage(bytes)).toThrow("No pixel data (7FE0,0010) in this file");
   });
 
   it("a frame index out of range throws, naming the reason", () => {

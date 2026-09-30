@@ -14,6 +14,7 @@ import type { Grouping } from "../model/series";
 import { groupAndOrder } from "../model/series";
 import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
+import type { DecodeOptions, DecodeOutcome } from "../pixels/protocol";
 import { checkSeries } from "../rules/series";
 import type { SeriesFinding } from "../rules/series";
 import { FOCUS_RING, FOCUS_RING_WITHIN } from "./focus";
@@ -28,9 +29,16 @@ type LoadScreenProps = {
   /** How many files may be read and parsed at once. Pass the pool's own worker count, so a
    * folder's files are never all read into memory ahead of the workers that will handle them. */
   concurrency: number;
+  /** Decodes one file's pixels. Never called until a preview is opened - see ImagePreview. */
+  decodePixels: (bytes: ArrayBuffer, options?: DecodeOptions) => Promise<DecodeOutcome>;
 };
 
 type PickedFile = { file: File; relativePath?: string };
+
+/** Re-reads one file's bytes, fresh, for the pixel path - independent of (and never reusing) the
+ * bytes already transferred away into the metadata parser. Keyed by name, the same key `parsed`
+ * already uses. */
+type BytesByName = Map<string, () => Promise<ArrayBuffer>>;
 
 /** Built only when more than one file was actually read as DICOM - the series answer replaces the
  * flat list exactly then, per section 3; zero or one real file keeps the plain list from 2.2. */
@@ -41,17 +49,18 @@ type SeriesData = {
   parsed: Map<string, ParsedFile>;
   report: SeriesReport;
   failedFiles: FailedFile[];
+  getBytesByName: BytesByName;
 };
 
 type View =
   | { kind: "idle" }
   | { kind: "loading"; name: string }
-  | { kind: "loaded"; name: string; nodes: TagNode[]; findings: Finding[] }
+  | { kind: "loaded"; name: string; nodes: TagNode[]; findings: Finding[]; getBytes: () => Promise<ArrayBuffer> }
   | { kind: "error"; headline: string; detail: string }
   | { kind: "loading-many"; done: number; total: number }
   | { kind: "loaded-many"; selected: number; results: FileResult[]; cancelled: boolean; series?: SeriesData };
 
-function buildSeriesData(results: FileResult[]): SeriesData {
+function buildSeriesData(results: FileResult[], getBytesByName: BytesByName): SeriesData {
   const read = results.filter((r): r is FileResult & { outcome: { kind: "read"; nodes: TagNode[]; findings: Finding[] } } => r.outcome.kind === "read");
   const parsed = new Map(read.map((r) => [r.name, { nodes: r.outcome.nodes, findings: r.outcome.findings }]));
   const instances = read.map((r) => toParsedInstance(r.name, r.relativePath, r.outcome.nodes));
@@ -62,7 +71,9 @@ function buildSeriesData(results: FileResult[]): SeriesData {
   const failedFiles: FailedFile[] = results
     .filter((r): r is FileResult & { outcome: { kind: "failed"; message: string } } => r.outcome.kind === "failed")
     .map((r) => ({ name: r.relativePath ?? r.name, message: r.outcome.message }));
-  return folderName === undefined ? { grouping, findings, parsed, report, failedFiles } : { folderName, grouping, findings, parsed, report, failedFiles };
+  return folderName === undefined
+    ? { grouping, findings, parsed, report, failedFiles, getBytesByName }
+    : { folderName, grouping, findings, parsed, report, failedFiles, getBytesByName };
 }
 
 const SAMPLE_NAME = "single.dcm";
@@ -71,7 +82,7 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) {
+export function LoadScreen({ parse, loadSample, concurrency, decodePixels }: LoadScreenProps) {
   const [view, setView] = useState<View>({ kind: "idle" });
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -117,7 +128,7 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
       const outcome = await parse(bytes);
       setView(
         outcome.ok
-          ? { kind: "loaded", name, nodes: outcome.nodes, findings: outcome.findings }
+          ? { kind: "loaded", name, nodes: outcome.nodes, findings: outcome.findings, getBytes: readBytes }
           : { kind: "error", headline: "This file could not be read as DICOM.", detail: outcome.message },
       );
     } catch (e) {
@@ -158,13 +169,17 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
       isCancelled: () => cancelledRef.current,
     });
 
+    // Keyed by name, the same key `parsed` uses - a fresh read each time, independent of the bytes
+    // already transferred away into the metadata parser above.
+    const getBytesByName: BytesByName = new Map(picked.map(({ file }) => [file.name, () => file.arrayBuffer()]));
+
     const readCount = results.filter((r) => r.outcome.kind === "read").length;
     setView({
       kind: "loaded-many",
       selected: picked.length,
       results,
       cancelled: cancelledRef.current,
-      series: readCount > 1 ? buildSeriesData(results) : undefined,
+      series: readCount > 1 ? buildSeriesData(results, getBytesByName) : undefined,
     });
   }
 
@@ -323,7 +338,13 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
         )}
 
         {view.kind === "loaded" && (
-          <SingleFileDetails nodes={view.nodes} findings={view.findings} announce={setAnnouncement} />
+          <SingleFileDetails
+            name={view.name}
+            nodes={view.nodes}
+            findings={view.findings}
+            announce={setAnnouncement}
+            image={{ fileKey: view.name, getBytes: view.getBytes, decode: decodePixels }}
+          />
         )}
 
         {view.kind === "loaded-many" &&
@@ -334,6 +355,8 @@ export function LoadScreen({ parse, loadSample, concurrency }: LoadScreenProps) 
               parsed={view.series.parsed}
               report={view.series.report}
               announce={setAnnouncement}
+              getBytesByName={view.series.getBytesByName}
+              decodePixels={decodePixels}
             />
           ) : (
             <MultiFileList results={view.results} />

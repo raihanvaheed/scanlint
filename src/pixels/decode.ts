@@ -2,7 +2,11 @@ import { parseDicom } from "dicom-parser";
 import type { DataSet } from "dicom-parser";
 import { extractFrameBytes } from "./pixel-data";
 
-export type DecodedImage = { width: number; height: number; rgba: Uint8ClampedArray };
+// `window` is the centre/width actually applied - the caller's override, the file's own declared
+// values, or the computed fallback - so 3.4's preview can show it without re-deriving it. Absent
+// for colour images, which are not windowed at all. `transferSyntaxUid` is the raw UID; turning it
+// into words ("uncompressed", "RLE compressed") is presentation, and lives in the UI layer.
+export type DecodedImage = { width: number; height: number; rgba: Uint8ClampedArray; window?: WindowSetting; transferSyntaxUid: string };
 export type WindowSetting = { center: number; width: number };
 
 const BIG_ENDIAN_EXPLICIT_UID = "1.2.840.10008.1.2.2";
@@ -41,7 +45,7 @@ function readWord(bytes: Uint8Array, byteOffset: number, bytesPerSample: number)
   throw new Error(`Unsupported BitsAllocated: ${bytesPerSample * 8}`);
 }
 
-function passthroughRgb(frameBytes: Uint8Array, rows: number, columns: number): DecodedImage {
+function passthroughRgb(frameBytes: Uint8Array, rows: number, columns: number, transferSyntaxUid: string): DecodedImage {
   const pixelCount = rows * columns;
   const rgba = new Uint8ClampedArray(pixelCount * 4);
   for (let i = 0; i < pixelCount; i++) {
@@ -50,7 +54,7 @@ function passthroughRgb(frameBytes: Uint8Array, rows: number, columns: number): 
     rgba[i * 4 + 2] = frameBytes[i * 3 + 2];
     rgba[i * 4 + 3] = 255;
   }
-  return { width: columns, height: rows, rgba };
+  return { width: columns, height: rows, rgba, transferSyntaxUid };
 }
 
 function decodeGrayscale(
@@ -65,6 +69,7 @@ function decodeGrayscale(
   rescaleIntercept: number,
   photometricInterpretation: string,
   window: WindowSetting | undefined,
+  transferSyntaxUid: string,
 ): DecodedImage {
   const pixelCount = rows * columns;
   const shift = highBit + 1 - bitsStored;
@@ -118,7 +123,7 @@ function decodeGrayscale(
     rgba[o + 3] = 255;
   }
 
-  return { width: columns, height: rows, rgba };
+  return { width: columns, height: rows, rgba, window: { center, width }, transferSyntaxUid };
 }
 
 /**
@@ -139,6 +144,12 @@ export function decodeImage(bytes: Uint8Array, options: { frame?: number; window
     throw new Error("Explicit VR Big Endian (1.2.840.10008.1.2.2) is not supported: it is retired and rare, and byte-swapped rendering would be worse than refusing");
   }
 
+  // Checked before Rows/Columns/etc: a structured report or a DICOMDIR has neither pixel data nor
+  // an image geometry, and "no pixel data" is the plainer, truer fact about a file like that than
+  // "missing required attribute Rows" would be.
+  const pixelDataElement = dataSet.elements[TAG.pixelData];
+  if (!pixelDataElement) throw new Error("No pixel data (7FE0,0010) in this file");
+
   const rows = requireUint16(dataSet, TAG.rows, "Rows");
   const columns = requireUint16(dataSet, TAG.columns, "Columns");
   const bitsAllocated = requireUint16(dataSet, TAG.bitsAllocated, "BitsAllocated");
@@ -157,8 +168,6 @@ export function decodeImage(bytes: Uint8Array, options: { frame?: number; window
     throw new Error(`Frame ${frame} is out of range: this file has ${numberOfFrames} frame(s)`);
   }
 
-  const pixelDataElement = dataSet.elements[TAG.pixelData];
-  if (!pixelDataElement) throw new Error("No pixel data (7FE0,0010) in this file");
   if (transferSyntaxUid === RLE_LOSSLESS_UID && !pixelDataElement.encapsulatedPixelData) {
     throw new Error("RLE Lossless transfer syntax but pixel data is not encapsulated");
   }
@@ -178,7 +187,7 @@ export function decodeImage(bytes: Uint8Array, options: { frame?: number; window
       throw new Error("PlanarConfiguration 1 (colour-plane order) is not supported");
     }
     const frameBytes = extractFrameBytes(dataSet, pixelDataElement, frame, pixelCount, samplesPerPixel, bytesPerSample);
-    return passthroughRgb(frameBytes, rows, columns);
+    return passthroughRgb(frameBytes, rows, columns, transferSyntaxUid ?? "");
   }
 
   if (samplesPerPixel !== 1 || (photometricInterpretation !== "MONOCHROME1" && photometricInterpretation !== "MONOCHROME2")) {
@@ -192,5 +201,5 @@ export function decodeImage(bytes: Uint8Array, options: { frame?: number; window
   const window = options.window ?? (declaredCenter !== undefined && declaredWidth !== undefined ? { center: declaredCenter, width: declaredWidth } : undefined);
 
   const frameBytes = extractFrameBytes(dataSet, pixelDataElement, frame, pixelCount, samplesPerPixel, bytesPerSample);
-  return decodeGrayscale(frameBytes, rows, columns, bytesPerSample, bitsStored, highBit, pixelRepresentation, rescaleSlope, rescaleIntercept, photometricInterpretation, window);
+  return decodeGrayscale(frameBytes, rows, columns, bytesPerSample, bitsStored, highBit, pixelRepresentation, rescaleSlope, rescaleIntercept, photometricInterpretation, window, transferSyntaxUid ?? "");
 }

@@ -4,7 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileSystemDirectoryEntryLike, FileSystemEntryLike, FileSystemFileEntryLike } from "../lib/directory-entries";
 import type { ParseOutcome } from "../parse/protocol";
+import type { DecodeOutcome } from "../pixels/protocol";
 import { LoadScreen } from "./load-screen";
+
+// None of this file's tests open the image preview; a fake that is never expected to run is enough.
+const decodePixels = vi.fn<() => Promise<DecodeOutcome>>(() => Promise.reject(new Error("decodePixels was not expected to be called in this test")));
 
 afterEach(cleanup);
 
@@ -77,7 +81,7 @@ function fakeParse() {
 function setup(concurrency = 4) {
   const parse = fakeParse();
   const loadSample = vi.fn<() => Promise<ArrayBuffer>>(() => Promise.reject(new Error("not used")));
-  const view = render(<LoadScreen parse={parse} loadSample={loadSample} concurrency={concurrency} />);
+  const view = render(<LoadScreen parse={parse} loadSample={loadSample} concurrency={concurrency} decodePixels={decodePixels} />);
   return { parse, user: userEvent.setup(), ...view };
 }
 
@@ -98,7 +102,7 @@ function controllableParse() {
 function setupControllable(concurrency: number) {
   const { parse, pendingCount, resolveNext } = controllableParse();
   const loadSample = vi.fn<() => Promise<ArrayBuffer>>(() => Promise.reject(new Error("not used")));
-  const view = render(<LoadScreen parse={parse} loadSample={loadSample} concurrency={concurrency} />);
+  const view = render(<LoadScreen parse={parse} loadSample={loadSample} concurrency={concurrency} decodePixels={decodePixels} />);
   return { user: userEvent.setup(), pendingCount, resolveNext, ...view };
 }
 

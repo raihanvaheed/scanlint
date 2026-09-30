@@ -7,11 +7,15 @@ export type PixelClient = {
    *
    * A person looks at one image at a time, so there is one worker, not a pool. When a newer
    * request arrives while an older one is still in flight, the older one resolves immediately
-   * with `{ ok: false, message: "Superseded by a newer request." }` rather than eventually
-   * resolving with a slice the caller has since scrolled past.
+   * with `{ ok: false, superseded: true, message: "Superseded by a newer request." }` rather than
+   * eventually resolving with a slice the caller has since scrolled past. `superseded` is present
+   * only then - a caller writing `if (!outcome.ok) showError(outcome.message)` would otherwise
+   * flash that sentence at someone who did nothing wrong; checking `superseded` first and doing
+   * nothing is the correct handling, not an edge case to remember.
    *
-   * Resolves with `{ ok: false, message }` when the file cannot be decoded. Rejects only when the
-   * infrastructure fails: the worker cannot be created, errors, or the client is terminated.
+   * Resolves with `{ ok: false, message }` (no `superseded` key) when the file cannot be decoded.
+   * Rejects only when the infrastructure fails: the worker cannot be created, errors, or the
+   * client is terminated.
    */
   decode(bytes: ArrayBuffer, options?: DecodeOptions): Promise<DecodeOutcome>;
   terminate(): void;
@@ -25,7 +29,7 @@ type Job = {
 
 const defaultCreateWorker = () => new Worker(new URL("./worker.ts", import.meta.url));
 
-const SUPERSEDED: DecodeOutcome = { ok: false, message: "Superseded by a newer request." };
+const SUPERSEDED: DecodeOutcome = { ok: false, superseded: true, message: "Superseded by a newer request." };
 
 function toError(e: unknown): Error {
   return e instanceof Error ? e : new Error(String(e));
