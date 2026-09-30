@@ -19,20 +19,27 @@ function unpackSegment(segment: Uint8Array, expectedLength: number): Uint8Array 
   let outPos = 0;
   let inPos = 0;
 
-  while (outPos < expectedLength) {
+  // Centralises the bounds check so a literal run or a replicated value that runs past the
+  // segment's own end throws, the same as running out of room for a control byte - a truncated
+  // segment silently zero-filling the rest of the image is worse than refusing it.
+  function nextByte(): number {
     if (inPos >= segment.length) {
       throw new Error("RLE segment ended before producing the expected number of pixels");
     }
-    const control = segment[inPos++];
+    return segment[inPos++];
+  }
+
+  while (outPos < expectedLength) {
+    const control = nextByte();
 
     if (control <= 127) {
       const count = control + 1;
-      for (let i = 0; i < count && outPos < expectedLength; i++) out[outPos++] = segment[inPos++];
+      for (let i = 0; i < count && outPos < expectedLength; i++) out[outPos++] = nextByte();
     } else if (control === 128) {
       // no-op
     } else {
       const count = 257 - control;
-      const value = segment[inPos++];
+      const value = nextByte();
       for (let i = 0; i < count && outPos < expectedLength; i++) out[outPos++] = value;
     }
   }

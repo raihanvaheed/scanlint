@@ -1,4 +1,5 @@
-import { handleParse, toMessage } from "./handle";
+import { toMessage } from "../lib/to-message";
+import { handleParse } from "./handle";
 import type { ParseRequest, ParseResult } from "./protocol";
 
 self.onmessage = (event: MessageEvent<ParseRequest>) => {

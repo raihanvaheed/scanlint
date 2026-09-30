@@ -1080,7 +1080,6 @@ SECOND_WINDOW_WIDTH = 8190
 
 BURNED_IN_SIZE = 128
 BURNED_IN_TEXT = "TESTPATIENT"
-BURNED_IN_BACKGROUND = 2048
 BURNED_IN_MAX = (1 << PATTERN_BITS_STORED) - 1  # 4095
 
 SECONDARY_CAPTURE_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
@@ -1193,7 +1192,12 @@ def burned_in_bounding_box() -> Tuple[int, int, int, int]:
 
 
 def burned_in_pixels() -> np.ndarray:
-    image = np.full((BURNED_IN_SIZE, BURNED_IN_SIZE), BURNED_IN_BACKGROUND, dtype="<u2")
+    # 3.3: a phantom behind the text, not a flat field - a reader seeing two solid values either
+    # side of the text bounding box would reasonably wonder what the picture was proving. The disc
+    # radius is scaled down with the canvas (single.dcm's 80 was tuned for a 256x256 image) so the
+    # disc keeps the same proportion of the frame rather than swallowing nearly all of a 128x128 one.
+    radius = DISC_RADIUS * BURNED_IN_SIZE // ROWS
+    image = make_phantom(rows=BURNED_IN_SIZE, columns=BURNED_IN_SIZE, radius=radius)
     row0, col0, _, _ = burned_in_bounding_box()
     for i, ch in enumerate(BURNED_IN_TEXT):
         for gy, row in enumerate(GLYPHS[ch]):
@@ -1423,7 +1427,7 @@ def build_pixels_manifest(directory: Path) -> dict:
             "text": BURNED_IN_TEXT,
             "boundingBox": {"rowStart": row0, "colStart": col0, "rowEnd": row1, "colEnd": col1},
             "textValue": BURNED_IN_MAX,
-            "backgroundValue": BURNED_IN_BACKGROUND,
+            "background": "make_phantom(rows=128, columns=128) - a disc on a gradient with noise, not a uniform value",
         },
     })
 

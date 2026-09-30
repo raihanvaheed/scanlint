@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { handleParse, toMessage } from "./handle";
+import { handleParse } from "./handle";
 import { flattenNodes } from "../model/tree";
 
 const fixture = new Uint8Array(fs.readFileSync(path.resolve(__dirname, "../../public/samples/single.dcm")));
@@ -67,22 +67,6 @@ describe("handleParse on bad input", () => {
     const outcome = handleParse(bytes);
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.message).toContain("missing required meta header attribute");
-  });
-});
-
-describe("toMessage", () => {
-  it("returns a plain string as it is", () => {
-    expect(toMessage("readPart10Header: DICM prefix not found")).toBe("readPart10Header: DICM prefix not found");
-  });
-
-  it("returns an Error's message", () => {
-    expect(toMessage(new Error("boom"))).toBe("boom");
-  });
-
-  it("stringifies other values, and yields an empty string for undefined and null", () => {
-    expect(toMessage(42)).toBe("42");
-    expect(toMessage(undefined)).toBe("");
-    expect(toMessage(null)).toBe("");
   });
 });
 

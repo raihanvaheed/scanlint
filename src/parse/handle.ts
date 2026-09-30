@@ -2,18 +2,11 @@ import { applyNames, lookupAttribute } from "../model/dictionary";
 import { normalizeTag } from "../model/tag";
 import { splitVr } from "../model/vr";
 import { classify } from "../rules/phi";
+import { toMessage } from "../lib/to-message";
 import type { ParseOutcome } from "./protocol";
 import { parseMetadata } from "./walk";
 
 const FALLBACK_MESSAGE = "Could not read this file as DICOM.";
-
-// dicom-parser throws plain strings, so `e.message` is undefined for most failures.
-export function toMessage(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  if (e === undefined || e === null) return "";
-  return String(e);
-}
 
 // dicom-parser asks for a VR only in implicit-VR data, where the stream carries none. It passes its own
 // tag format ("x00100010"). An unknown tag, private ones included, gets undefined, and the parser

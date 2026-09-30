@@ -690,7 +690,7 @@
     },
     {
       "file": "burned-in.dcm",
-      "sha256": "7e27dd327c608e42fad3c7ff26938addde3c022c31107f41c2ee8b9e32d38a42",
+      "sha256": "30fe1722a6ff0d3a27a1d4a56abca096841ff8be8920cef605c21cfd5133b164",
       "transferSyntaxUid": "1.2.840.10008.1.2.1",
       "rows": 128,
       "columns": 128,
@@ -699,7 +699,7 @@
       "highBit": 11,
       "pixelRepresentation": 0,
       "photometricInterpretation": "MONOCHROME2",
-      "pixelArraySha256": "d0a14c27d251b08a752bdea6ae5355ccf8a195d3a265186fffc3ba69ad4215a3",
+      "pixelArraySha256": "a12d038b718dad12a5d192053a556f09141792f14af50bad92b36d9c8a689e1d",
       "burnedInAnnotation": {
         "declared": "NO",
         "deliberatelyFalse": true,
@@ -712,7 +712,7 @@
           "colEnd": 108
         },
         "textValue": 4095,
-        "backgroundValue": 2048
+        "background": "make_phantom(rows=128, columns=128) - a disc on a gradient with noise, not a uniform value"
       }
     }
   ]
