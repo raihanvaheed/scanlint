@@ -690,6 +690,7 @@
     },
     {
       "file": "burned-in.dcm",
+      "directory": "public/samples",
       "sha256": "30fe1722a6ff0d3a27a1d4a56abca096841ff8be8920cef605c21cfd5133b164",
       "transferSyntaxUid": "1.2.840.10008.1.2.1",
       "rows": 128,

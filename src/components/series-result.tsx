@@ -10,12 +10,18 @@ import { formatTag } from "../model/tag";
 import { identifyingFindings } from "../model/tree";
 import type { Finding } from "../model/types";
 import type { Grouping, Instance, OrderedBy, Series } from "../model/series";
+import type { DecodeOptions, DecodeOutcome } from "../pixels/protocol";
 import type { SeriesFinding } from "../rules/series";
 import { Reason } from "./findings-list";
 import { FieldValue, useReveal } from "./field-value";
 import type { Reveal } from "./field-value";
 import { FOCUS_RING, FOCUS_RING_WITHIN } from "./focus";
 import { BURNED_IN_CAVEAT, SingleFileResult } from "./single-file-result";
+
+/** Re-reads one file's bytes, fresh, for the pixel path - keyed by name, the same key `parsed`
+ * already uses. Defined here too (not imported from load-screen.tsx) to avoid a circular import;
+ * it is a plain type alias, not worth a shared module of its own. */
+type BytesByName = Map<string, () => Promise<ArrayBuffer>>;
 
 /** Files this run didn't end up reading as part of any series - still worth a line each, exactly as
  * 2.2's flat-list totals said, so replacing that list with the series answer never silently drops
@@ -179,7 +185,7 @@ function SeriesBlock({
   findings: SeriesFinding[];
   parsed: Map<string, ParsedFile>;
   reveal: Reveal;
-  onOpenSlice: (fileName: string, displayName: string, label: string) => void;
+  onOpenSlice: (fileName: string, displayName: string, label: string, instances: Instance[]) => void;
   registerRow: (fileName: string, el: HTMLButtonElement | null) => void;
 }) {
   const fileNames = series.instances.map((i) => i.fileName);
@@ -229,7 +235,7 @@ function SeriesBlock({
                 key={instance.fileName}
                 instance={instance}
                 findingCount={identifyingFindings(parsed.get(instance.fileName)?.findings ?? []).length}
-                onOpen={() => onOpenSlice(instance.fileName, instance.relativePath ?? instance.fileName, label)}
+                onOpen={() => onOpenSlice(instance.fileName, instance.relativePath ?? instance.fileName, label, series.instances)}
                 rowRef={(el) => registerRow(instance.fileName, el)}
               />
             ))}
@@ -258,7 +264,9 @@ function UngroupedBlock({ instances }: { instances: Instance[] }) {
   );
 }
 
-type OpenSlice = { fileName: string; displayName: string; label: string };
+/** `instances` is the opened slice's own series, in 2.3's geometric order (never filename order) -
+ * kept alongside so stepping can move through it without re-deriving which series it came from. */
+type OpenSlice = { fileName: string; displayName: string; label: string; instances: Instance[] };
 
 /**
  * The series view's body: the reveal-all control and the four sections, kept mounted (hidden, not
@@ -271,12 +279,16 @@ export function SeriesBody({
   parsed,
   report,
   announce,
+  getBytesByName,
+  decodePixels,
 }: {
   grouping: Grouping;
   findings: SeriesFinding[];
   parsed: Map<string, ParsedFile>;
   report: SeriesReport;
   announce: (message: string) => void;
+  getBytesByName: BytesByName;
+  decodePixels: (bytes: ArrayBuffer, options?: DecodeOptions) => Promise<DecodeOutcome>;
 }) {
   const [openSlice, setOpenSlice] = useState<OpenSlice | null>(null);
   const scrollPosition = useRef(0);
@@ -309,14 +321,23 @@ export function SeriesBody({
     else rowRefs.current.delete(fileName);
   }
 
-  function openSliceRow(fileName: string, displayName: string, label: string) {
+  function openSliceRow(fileName: string, displayName: string, label: string, instances: Instance[]) {
     scrollPosition.current = window.scrollY;
-    setOpenSlice({ fileName, displayName, label });
+    setOpenSlice({ fileName, displayName, label, instances });
   }
 
   function goBack() {
     returningTo.current = openSlice?.fileName ?? null;
     setOpenSlice(null);
+  }
+
+  // Section 6: geometric order (2.3's own), never filename order - `instances` already is that
+  // order, so stepping is just walking it.
+  function stepTo(index: number) {
+    if (!openSlice) return;
+    const target = openSlice.instances[index];
+    if (!target) return;
+    setOpenSlice({ ...openSlice, fileName: target.fileName, displayName: target.relativePath ?? target.fileName });
   }
 
   useLayoutEffect(() => {
@@ -331,6 +352,7 @@ export function SeriesBody({
   }, [openSlice]);
 
   const openFile = openSlice ? parsed.get(openSlice.fileName) : undefined;
+  const openIndex = openSlice ? openSlice.instances.findIndex((i) => i.fileName === openSlice.fileName) : -1;
 
   return (
     <div>
@@ -420,7 +442,25 @@ export function SeriesBody({
             {`Back to ${openSlice.label}`}
           </button>
           <div className="mt-6">
-            <SingleFileResult name={openSlice.displayName} nodes={openFile.nodes} findings={openFile.findings} announce={announce} headingRef={drillHeadingRef} />
+            <SingleFileResult
+              name={openSlice.displayName}
+              nodes={openFile.nodes}
+              findings={openFile.findings}
+              announce={announce}
+              headingRef={drillHeadingRef}
+              image={{
+                fileKey: openSlice.fileName,
+                getBytes: getBytesByName.get(openSlice.fileName) ?? (() => Promise.reject(new Error(`No bytes available for ${openSlice.fileName}`))),
+                decode: decodePixels,
+                stepping: {
+                  label: `Slice ${openIndex + 1} of ${openSlice.instances.length}`,
+                  hasPrevious: openIndex > 0,
+                  hasNext: openIndex >= 0 && openIndex < openSlice.instances.length - 1,
+                  onPrevious: () => stepTo(openIndex - 1),
+                  onNext: () => stepTo(openIndex + 1),
+                },
+              }}
+            />
           </div>
         </div>
       )}

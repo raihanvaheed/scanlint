@@ -13,6 +13,8 @@ import type { SeriesFinding } from "../rules/series";
 import { toParsedInstance } from "../lib/series-input";
 import { buildSeriesReport } from "../lib/series-report";
 import type { ParsedFile, SeriesReport } from "../lib/series-report";
+import { decodeImage } from "../pixels/decode";
+import type { DecodeOptions, DecodeOutcome } from "../pixels/protocol";
 import { SeriesBody, SeriesHeader } from "./series-result";
 
 afterEach(cleanup);
@@ -41,8 +43,32 @@ const fixtureReport = buildSeriesReport(
 
 const NO_ANNOUNCE = () => {};
 
+// A real getBytes per fixture file, and a real decode (decodeImage, wrapped exactly as
+// createPixelClient's decode() resolves) - both work directly against the actual fixtures without
+// needing a worker, so the drill-down's image preview can be exercised for real in these tests too.
+const fixtureGetBytesByName = new Map(fixtureFiles.map((f) => [f.fileName, () => Promise.resolve(new Uint8Array(fs.readFileSync(path.join(DIR, f.fileName))).buffer as ArrayBuffer)]));
+
+function decodePixels(bytes: ArrayBuffer, options?: DecodeOptions): Promise<DecodeOutcome> {
+  try {
+    const image = decodeImage(new Uint8Array(bytes), options);
+    return Promise.resolve({ ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid });
+  } catch (e) {
+    return Promise.resolve({ ok: false, message: e instanceof Error ? e.message : String(e) });
+  }
+}
+
 function renderBody(grouping: Grouping, findings: SeriesFinding[], parsed: Map<string, ParsedFile>, report: SeriesReport) {
-  return render(<SeriesBody grouping={grouping} findings={findings} parsed={parsed} report={report} announce={NO_ANNOUNCE} />);
+  return render(
+    <SeriesBody
+      grouping={grouping}
+      findings={findings}
+      parsed={parsed}
+      report={report}
+      announce={NO_ANNOUNCE}
+      getBytesByName={fixtureGetBytesByName}
+      decodePixels={decodePixels}
+    />,
+  );
 }
 
 describe("against the fixture: headline counts", () => {
@@ -299,5 +325,39 @@ describe("drill-down", () => {
 
     await user.click(screen.getByRole("button", { name: /^Back to / }));
     expect(document.activeElement?.textContent).toContain(fileName);
+  });
+});
+
+describe("stepping through a series (3.4)", () => {
+  async function openFirstSlice(user: ReturnType<typeof userEvent.setup>) {
+    const slicesDetails = screen.getAllByText(/^Slices \(/)[0].closest("details") as HTMLElement;
+    const firstRow = within(slicesDetails).getAllByRole("button")[0];
+    await user.click(firstRow);
+  }
+
+  it("moves through the series' own geometric order, not filename order, and disables at each end", async () => {
+    const user = userEvent.setup();
+    renderBody(fixtureGrouping, fixtureFindings, fixtureParsed, fixtureReport);
+    await openFirstSlice(user);
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+
+    const seriesA = fixtureGrouping.studies[0].series[0];
+    const geometricOrder = seriesA.instances.map((i) => i.fileName);
+    const filenameOrder = [...geometricOrder].sort();
+    expect(geometricOrder).not.toEqual(filenameOrder); // the fixture's own guarantee, reused here
+
+    expect(await screen.findByText(`Slice 1 of ${geometricOrder.length}`)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Previous slice" })).toHaveProperty("disabled", true);
+
+    const visited = [geometricOrder[0]];
+    for (let i = 1; i < geometricOrder.length; i++) {
+      await user.click(screen.getByRole("button", { name: "Next slice" }));
+      await screen.findByText(`Slice ${i + 1} of ${geometricOrder.length}`);
+      const heading = screen.getAllByRole("heading").find((h) => geometricOrder.includes(h.textContent ?? ""));
+      visited.push(heading?.textContent ?? "");
+    }
+
+    expect(visited).toEqual(geometricOrder);
+    expect(screen.getByRole("button", { name: "Next slice" })).toHaveProperty("disabled", true);
   });
 });

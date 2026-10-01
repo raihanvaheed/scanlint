@@ -51,7 +51,7 @@ function setup() {
 const buffer = (length = 8): ArrayBuffer => new Uint8Array(length).fill(7).buffer;
 const idOf = (worker: FakeWorker, index = 0): number => worker.received[index].id;
 
-const image = (rgba: number[]) => ({ ok: true as const, width: 1, height: 1, rgba: new Uint8Array(rgba).buffer });
+const image = (rgba: number[]) => ({ ok: true as const, width: 1, height: 1, rgba: new Uint8Array(rgba).buffer, transferSyntaxUid: "1.2.840.10008.1.2.1" });
 
 describe("a single request", () => {
   it("resolves with the worker's image, without the id", async () => {
@@ -112,8 +112,22 @@ describe("superseding", () => {
     workers[0].reply({ id: newerId, ...newerImage });
     workers[0].reply({ id: olderId, ...image([1, 1, 1, 1]) });
 
-    await expect(older).resolves.toEqual({ ok: false, message: "Superseded by a newer request." });
+    const olderOutcome = await older;
+    expect(olderOutcome).toEqual({ ok: false, superseded: true, message: "Superseded by a newer request." });
     await expect(newer).resolves.toEqual(newerImage);
+  });
+
+  it("the superseded discriminator is present only on a superseded outcome, never on a real failure", async () => {
+    const { client, workers } = setup();
+    const superseded = client.decode(buffer());
+    const later = client.decode(buffer());
+    workers[0].reply({ id: idOf(workers[0], 1), ...image([1, 1, 1, 1]) });
+    await later;
+    expect(await superseded).toHaveProperty("superseded", true);
+
+    const failing = client.decode(buffer());
+    workers[0].reply({ id: idOf(workers[0], 2), ok: false, message: "bad file" });
+    expect(await failing).not.toHaveProperty("superseded");
   });
 });
 

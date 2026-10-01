@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Finding, TagNode } from "../model/types";
 import type { ParseOutcome } from "../parse/protocol";
+import type { DecodeOutcome } from "../pixels/protocol";
 import { LoadScreen } from "./load-screen";
 
 afterEach(cleanup);
@@ -42,8 +43,14 @@ function setup(parseResult: ParseOutcome | Error, loadResult: ArrayBuffer | Erro
   const loadSample = vi.fn<() => Promise<ArrayBuffer>>(() =>
     loadResult instanceof Error ? Promise.reject(loadResult) : Promise.resolve(loadResult),
   );
-  const view = render(<LoadScreen parse={parse} loadSample={loadSample} concurrency={concurrency} />);
-  return { parse, loadSample, user: userEvent.setup(), ...view };
+  const loadBurnedInSample = vi.fn<() => Promise<ArrayBuffer>>(() => Promise.resolve(sampleBytes));
+  // None of this file's tests open the image preview; a fake that is never expected to run is
+  // enough, and failing loudly if that ever changes is better than a silent, unrelated hang.
+  const decodePixels = vi.fn<() => Promise<DecodeOutcome>>(() => Promise.reject(new Error("decodePixels was not expected to be called in this test")));
+  const view = render(
+    <LoadScreen parse={parse} loadSample={loadSample} loadBurnedInSample={loadBurnedInSample} concurrency={concurrency} decodePixels={decodePixels} />,
+  );
+  return { parse, loadSample, loadBurnedInSample, decodePixels, user: userEvent.setup(), ...view };
 }
 
 describe("idle", () => {
@@ -55,6 +62,26 @@ describe("idle", () => {
     expect((screen.getByLabelText("or choose files") as HTMLInputElement).type).toBe("file");
     expect((screen.getByLabelText("or choose a folder") as HTMLInputElement).type).toBe("file");
     expect(screen.getByText("Files are read in your browser. Nothing is uploaded.")).toBeTruthy();
+  });
+
+  it("3.4a: shows the second sample control, smaller and below Load sample, which stays unchanged", () => {
+    setup(outcome({}));
+
+    const primary = screen.getByRole("button", { name: "Load sample" });
+    const secondary = screen.getByRole("button", { name: "Load a scan with text in the image" });
+    expect(primary.compareDocumentPosition(secondary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Not "burned-in annotation" - that term means nothing without reading the DICOM standard.
+    expect(screen.queryByText(/burned-in annotation/)).toBeNull();
+  });
+
+  it("3.4a: Load a scan with text in the image reads it through its own loader", async () => {
+    const { user, loadBurnedInSample, loadSample } = setup(outcome({ burned: 1 }, "NO"));
+
+    await user.click(screen.getByRole("button", { name: "Load a scan with text in the image" }));
+
+    expect(await screen.findByText("This file declares burned-in annotation: NO")).toBeTruthy();
+    expect(loadBurnedInSample).toHaveBeenCalledTimes(1);
+    expect(loadSample).not.toHaveBeenCalled();
   });
 
   it("gives neither file input an accept attribute, because real DICOM files often have no extension", () => {
@@ -462,10 +489,12 @@ describe("skip links", () => {
     }
   });
 
-  it("is the first stop after the filename heading, and Skip to all fields moves focus to the tree heading", async () => {
+  it("is the stop right after Show image (3.4's preview control), and Skip to all fields moves focus to the tree heading", async () => {
     const { user } = await load();
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "single.dcm" }));
 
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Show image" }));
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole("link", { name: "Skip to all fields" }));
     await user.keyboard("{Enter}");

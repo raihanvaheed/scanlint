@@ -177,6 +177,18 @@ describe("project invariants", () => {
       content: fs.readFileSync(path.join(ROOT, file), "utf8"),
     }));
 
+    // 3.4a widened this on purpose. The count of "fetch(" calls was never the real property - it
+    // was always standing in for one: every fetch in this file is a single-argument call to a
+    // literal, same-origin, bundled .dcm path, with the closing parenthesis immediately after the
+    // string, so a second argument (a method, a body - how data would leave the browser) cannot
+    // exist. A second sample loader (loadBurnedInSample) needs its own literal call, so "exactly
+    // one" stopped being true without the file becoming any less safe. What is checked instead,
+    // directly: every "fetch(" occurrence matches the literal pattern (so nothing else can be
+    // hiding behind one that does), and the count is still capped - at 2, not 1 - so a third
+    // fetch, anywhere, still needs a deliberate change to this test, not a silent addition.
+    const FETCH_LITERAL = /fetch\(\s*["']\/samples\/[A-Za-z0-9._-]+\.dcm["']\s*\)/g;
+    const MAX_FETCH_CALLS = 2;
+
     it("is a single file", () => {
       expect(
         NETWORK_ALLOWLIST.length,
@@ -186,25 +198,33 @@ describe("project invariants", () => {
       ).toBe(1);
     });
 
-    it("contains exactly one fetch call", () => {
+    it("every fetch( call matches the literal, same-origin, bundled-.dcm pattern - none is anything else", () => {
       for (const { file, content } of allowlisted) {
+        const totalCalls = content.split("fetch(").length - 1;
+        const literalCalls = content.match(FETCH_LITERAL)?.length ?? 0;
         expect(
-          content.split("fetch(").length - 1,
-          `${file} must contain exactly one "fetch(". It exists only to load the bundled sample; ` +
-            "a second call is a second place that could send data, and this file is exempt from the scan.",
-        ).toBe(1);
+          literalCalls,
+          `${file} has ${totalCalls} "fetch(" call(s) but only ${literalCalls} match a literal, ` +
+            "same-origin /samples/*.dcm path with the closing parenthesis immediately after the " +
+            "string. Every fetch here must be exactly that shape - a call that does not match could " +
+            "be carrying a second argument (a method, a body), which is how data would leave the browser.",
+        ).toBe(totalCalls);
       }
     });
 
-    it("only ever makes a single-argument GET of a bundled sample, using no other network API", () => {
+    it(`never has more than ${MAX_FETCH_CALLS} fetch( calls`, () => {
       for (const { file, content } of allowlisted) {
+        const totalCalls = content.split("fetch(").length - 1;
         expect(
-          /fetch\(\s*["']\/samples\/[A-Za-z0-9._-]+\.dcm["']\s*\)/.test(content),
-          `${file} must call fetch with exactly one string literal, a same-origin /samples/*.dcm path, ` +
-            "and nothing else. The closing parenthesis directly after the literal is deliberate: a " +
-            "second argument is how a request gains a method or a body, which is how data leaves the browser.",
-        ).toBe(true);
+          totalCalls,
+          `${file} has ${totalCalls} fetch calls, more than the cap of ${MAX_FETCH_CALLS}. An ` +
+            "allowlist - or a call count - that can grow silently is not an allowlist.",
+        ).toBeLessThanOrEqual(MAX_FETCH_CALLS);
+      }
+    });
 
+    it("uses no network API other than fetch", () => {
+      for (const { file, content } of allowlisted) {
         for (const term of FORBIDDEN_TERMS.filter((t) => t !== "fetch(")) {
           expect(
             content.includes(term),

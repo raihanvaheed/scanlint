@@ -1065,6 +1065,10 @@ def verify_series(root: Path, slices: List[Tuple[str, str, int]], manifest: dict
 
 PIXELS_DIR_REL = "fixtures/pixels"
 PIXELS_MANIFEST_REL = "fixtures/pixels.manifest.json"
+# 3.4a: burned-in.dcm ships as a second sample, not a test-only fixture, so a visitor with no DICOM
+# file of their own can still see the demonstration this stage was built for. It is written here,
+# not into PIXELS_DIR_REL, and the manifest records that explicitly (its own "directory" key).
+BURNED_IN_SAMPLE_REL = "public/samples/burned-in.dcm"
 
 PATTERN_SIZE = 64
 PATTERN_BITS_ALLOCATED = 16
@@ -1326,26 +1330,33 @@ def build_pixels(root: Path) -> None:
     }
     datasets["burned-in.dcm"].BurnedInAnnotation = "NO"
 
-    for name, ds in datasets.items():
-        ds.save_as(str(directory / name), write_like_original=False)
+    burned_in_path = root / BURNED_IN_SAMPLE_REL
+    burned_in_path.parent.mkdir(parents=True, exist_ok=True)
 
-    manifest = build_pixels_manifest(directory)
-    verify_pixels(directory, manifest)
+    for name, ds in datasets.items():
+        if name == "burned-in.dcm":
+            ds.save_as(str(burned_in_path), write_like_original=False)
+        else:
+            ds.save_as(str(directory / name), write_like_original=False)
+
+    manifest = build_pixels_manifest(directory, burned_in_path)
+    verify_pixels(directory, manifest, burned_in_path)
 
     path = root / PIXELS_MANIFEST_REL
     path.write_bytes((json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
 
-    print(f"wrote {directory} (6 files)")
+    print(f"wrote {directory} (5 files)")
     total = 0
     for name in sorted(p.name for p in directory.iterdir()):
         size = (directory / name).stat().st_size
         total += size
         print(f"  {name:<22} {size:>7} bytes  sha256 {_sha(directory / name)}")
     print(f"  total: {total} bytes")
+    print(f"wrote {burned_in_path} ({burned_in_path.stat().st_size} bytes, sha256 {_sha(burned_in_path)})")
     print(f"wrote {path} ({path.stat().st_size} bytes, sha256 {_sha(path)})")
 
 
-def build_pixels_manifest(directory: Path) -> dict:
+def build_pixels_manifest(directory: Path, burned_in_path: Path) -> dict:
     """Everything expected of fixtures/pixels/, computed from the files as written to disk - never
     from the in-memory arrays used to build them, so a write/read round-trip bug cannot hide."""
     files_manifest: List[dict] = []
@@ -1402,12 +1413,16 @@ def build_pixels_manifest(directory: Path) -> dict:
         "expectedOutputSecondWindow": expected_outputs(signed_arr, False, SECOND_WINDOW_CENTER, SECOND_WINDOW_WIDTH),
     })
 
-    burned_ds = pydicom.dcmread(str(directory / "burned-in.dcm"))
+    burned_ds = pydicom.dcmread(str(burned_in_path))
     burned_arr = burned_ds.pixel_array.astype("<u2")
     row0, col0, row1, col1 = burned_in_bounding_box()
     files_manifest.append({
         "file": "burned-in.dcm",
-        "sha256": _sha(directory / "burned-in.dcm"),
+        # Everything else in this manifest lives at the top-level "directory" below; this one file
+        # is shipped as a second sample instead (3.4a), so its own location is recorded explicitly
+        # rather than silently assumed to be fixtures/pixels/ like its siblings.
+        "directory": BURNED_IN_SAMPLE_REL.rsplit("/", 1)[0],
+        "sha256": _sha(burned_in_path),
         "transferSyntaxUid": EXPLICIT_VR_LITTLE_ENDIAN,
         "rows": BURNED_IN_SIZE,
         "columns": BURNED_IN_SIZE,
@@ -1457,9 +1472,12 @@ def build_pixels_manifest(directory: Path) -> dict:
     }
 
 
-def verify_pixels(directory: Path, manifest: dict) -> None:
+def verify_pixels(directory: Path, manifest: dict, burned_in_path: Path) -> None:
     """Read the written bytes back with pydicom and confirm every check in section 9."""
     print("pixel checks:")
+
+    def path_of(entry: dict) -> Path:
+        return burned_in_path if entry["file"] == "burned-in.dcm" else directory / entry["file"]
 
     def ok(message: str, condition: bool) -> None:
         if not condition:
@@ -1492,13 +1510,13 @@ def verify_pixels(directory: Path, manifest: dict) -> None:
     )
 
     for f in manifest["files"]:
-        ds = pydicom.dcmread(str(directory / f["file"]))
+        ds = pydicom.dcmread(str(path_of(f)))
         text = str(ds)
         if "(7fe0, 0010)" not in text.lower():
             raise SystemExit(f"{f['file']}: pydicom's dump shows no pixel data")
     ok("every file reads as valid DICOM through pydicom's own dump", True)
 
-    burned_ds = pydicom.dcmread(str(directory / "burned-in.dcm"))
+    burned_ds = pydicom.dcmread(str(burned_in_path))
     burned_arr = burned_ds.pixel_array.astype("<u2")
     bb = manifest["files"][-1]["burnedInAnnotation"]["boundingBox"]
     mask = np.zeros_like(burned_arr, dtype=bool)
