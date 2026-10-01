@@ -48,6 +48,8 @@ import pydicom.misc
 from pydicom.dataelem import DataElement
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.datadict import dictionary_VR, keyword_for_tag, tag_for_keyword
+from pydicom.encaps import decode_data_sequence, encapsulate, get_frame_offsets
+from pydicom.filebase import DicomBytesIO
 from pydicom.multival import MultiValue
 from pydicom.sequence import Sequence
 from pydicom.tag import BaseTag, Tag
@@ -1545,6 +1547,697 @@ def verify_pixels(directory: Path, manifest: dict, burned_in_path: Path) -> None
     ok("the eight expected output values per file match what the formula in section 4 produces", not mismatches)
 
 
+# --- 3.5: JPEG baseline (Process 1) fixtures - a DC-only encoder ---
+#
+# A general JPEG encoder is out of scope and unnecessary here. Every fixture image below is a grid
+# of 8x8 blocks, each block one constant value. A block like that has a DC coefficient and nothing
+# else: the forward DCT of a constant is exact, the quantiser (8, chosen so Q00 divides evenly) is
+# exact, and the inverse on the decoding side is exact. These fixtures therefore have a zero (or,
+# for the RGB file, a two-rounding-steps-wide) tolerance oracle without any JPEG library at all -
+# see section 7's own note on why there is no expected-RGBA hash.
+
+JPEG_BASELINE_UID = "1.2.840.10008.1.2.4.50"
+
+JPEG_BLOCK_SIZE = 8
+
+# Nine DC symbols (category 0-8: diff is in -255..255, so category never exceeds 8), one Huffman
+# code per length 1-9. HUFFVAL in increasing category order gives each category t the code "t ones
+# then a zero" once run through the standard's own Annex C.2 code-generation procedure below - not
+# hand-assigned, so the DHT bytes actually written and the bits actually packed cannot drift apart.
+JPEG_DC_BITS = [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0]
+JPEG_DC_HUFFVAL = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+# One AC symbol: end-of-block (0x00). Every block here has only a DC coefficient, so this is the
+# only AC code this encoder will ever need.
+JPEG_AC_BITS = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+JPEG_AC_HUFFVAL = [0]
+
+
+def jpeg_huffman_codes(bits: List[int], huffval: List[int]) -> Dict[int, Tuple[int, int]]:
+    """Annex C.2: derive each symbol's (code, length) from BITS/HUFFVAL - the same procedure a
+    decoder uses to rebuild the table from the DHT marker, so there is exactly one source for what
+    a symbol's code is, not a written table and a separately hand-assigned one."""
+    sizes: List[int] = []
+    for length, count in enumerate(bits, start=1):
+        sizes.extend([length] * count)
+    codes: List[int] = []
+    code = 0
+    size = sizes[0]
+    i = 0
+    while i < len(sizes):
+        while i < len(sizes) and sizes[i] == size:
+            codes.append(code)
+            code += 1
+            i += 1
+        code <<= 1
+        size += 1
+    return {symbol: (c, s) for symbol, c, s in zip(huffval, codes, sizes)}
+
+
+JPEG_DC_CODES = jpeg_huffman_codes(JPEG_DC_BITS, JPEG_DC_HUFFVAL)
+JPEG_AC_CODES = jpeg_huffman_codes(JPEG_AC_BITS, JPEG_AC_HUFFVAL)
+
+
+def jpeg_category(diff: int) -> int:
+    """The number of bits needed for abs(diff): 2**(t-1) <= abs(diff) < 2**t, t=0 for diff=0."""
+    return 0 if diff == 0 else abs(diff).bit_length()
+
+
+def jpeg_value_bits(diff: int, t: int) -> int:
+    """The t value bits that follow a non-zero category's Huffman code."""
+    return diff if diff > 0 else diff + (1 << t) - 1
+
+
+class JpegBitWriter:
+    """Packs bits MSB-first into bytes, stuffing a 0x00 after every 0xFF byte produced - the
+    encoder's own counterpart to a decoder's destuffing, required because 0xFF starts a marker."""
+
+    def __init__(self) -> None:
+        self.out = bytearray()
+        self._buf = 0
+        self._nbits = 0
+        self.stuff_count = 0
+
+    def _emit_byte(self, byte: int) -> None:
+        self.out.append(byte)
+        if byte == 0xFF:
+            self.out.append(0x00)
+            self.stuff_count += 1
+
+    def put_bits(self, value: int, length: int) -> None:
+        for i in range(length - 1, -1, -1):
+            self._buf = (self._buf << 1) | ((value >> i) & 1)
+            self._nbits += 1
+            if self._nbits == 8:
+                self._emit_byte(self._buf & 0xFF)
+                self._buf = 0
+                self._nbits = 0
+
+    def finish(self) -> bytes:
+        """Pads the final partial byte with 1 bits, per section 4 - stuffed like any other if that
+        pad itself produces 0xFF."""
+        if self._nbits > 0:
+            pad = 8 - self._nbits
+            self._buf = (self._buf << pad) | ((1 << pad) - 1)
+            self._emit_byte(self._buf & 0xFF)
+            self._buf = 0
+            self._nbits = 0
+        return bytes(self.out)
+
+
+def _jpeg_u16(n: int) -> bytes:
+    return n.to_bytes(2, "big")
+
+
+def _jpeg_app0() -> bytes:
+    data = b"JFIF\x00" + bytes([1, 1]) + bytes([0]) + _jpeg_u16(1) + _jpeg_u16(1) + bytes([0, 0])
+    return b"\xFF\xE0" + _jpeg_u16(len(data) + 2) + data
+
+
+def _jpeg_dqt() -> bytes:
+    data = bytes([0x00]) + bytes([8] * 64)  # Pq=0, Tq=0; every entry 8 - zigzag is irrelevant here
+    return b"\xFF\xDB" + _jpeg_u16(len(data) + 2) + data
+
+
+def _jpeg_sof0(rows: int, columns: int, nf: int) -> bytes:
+    data = bytes([8]) + _jpeg_u16(rows) + _jpeg_u16(columns) + bytes([nf])
+    for ci in range(1, nf + 1):
+        data += bytes([ci, 0x11, 0x00])  # H=1, V=1 (no subsampling), Tq=0
+    return b"\xFF\xC0" + _jpeg_u16(len(data) + 2) + data
+
+
+def _jpeg_dht(table_class: int, table_id: int, bits: List[int], huffval: List[int]) -> bytes:
+    data = bytes([(table_class << 4) | table_id]) + bytes(bits) + bytes(huffval)
+    return b"\xFF\xC4" + _jpeg_u16(len(data) + 2) + data
+
+
+def _jpeg_sos(nf: int) -> bytes:
+    data = bytes([nf])
+    for cj in range(1, nf + 1):
+        data += bytes([cj, 0x00])  # Td=0, Ta=0
+    data += bytes([0x00, 0x3F, 0x00])  # Ss=0, Se=63, Ah/Al=0
+    return b"\xFF\xDA" + _jpeg_u16(len(data) + 2) + data
+
+
+def encode_jpeg_baseline(block_grids: List[np.ndarray], rows: int, columns: int) -> Tuple[bytes, int]:
+    """`block_grids`: one or three (block_rows, block_cols) arrays of constant per-block sample
+    values (0-255). Three components are written as interleaved MCUs (section 4's "MCU order"):
+    one Y block, one Cb block, one Cr block per grid position, three independent DC predictors.
+    Returns (the full JPEG byte string, the number of 0x00 stuff bytes inserted)."""
+    nf = len(block_grids)
+    block_rows, block_cols = block_grids[0].shape
+
+    predictors = [0] * nf
+    writer = JpegBitWriter()
+    for by in range(block_rows):
+        for bx in range(block_cols):
+            for c in range(nf):
+                v = int(block_grids[c][by, bx])
+                s = v - 128
+                diff = s - predictors[c]
+                predictors[c] = s
+                t = jpeg_category(diff)
+                code, length = JPEG_DC_CODES[t]
+                writer.put_bits(code, length)
+                if t > 0:
+                    writer.put_bits(jpeg_value_bits(diff, t), t)
+                eob_code, eob_length = JPEG_AC_CODES[0x00]
+                writer.put_bits(eob_code, eob_length)
+    entropy = writer.finish()
+
+    jpeg = bytearray()
+    jpeg += b"\xFF\xD8"
+    jpeg += _jpeg_app0()
+    jpeg += _jpeg_dqt()
+    jpeg += _jpeg_sof0(rows, columns, nf)
+    jpeg += _jpeg_dht(0, 0, JPEG_DC_BITS, JPEG_DC_HUFFVAL)
+    jpeg += _jpeg_dht(1, 0, JPEG_AC_BITS, JPEG_AC_HUFFVAL)
+    jpeg += _jpeg_sos(nf)
+    jpeg += entropy
+    jpeg += b"\xFF\xD9"
+    return bytes(jpeg), writer.stuff_count
+
+
+def jpeg_rgb_to_ycbcr(r: int, g: int, b: int) -> Tuple[int, int, int]:
+    """JFIF, rounded to nearest and clamped to 0-255 (section 4). Two roundings - this one and the
+    decoder's own - are why the RGB fixture's oracle carries a +/-3 per-channel tolerance."""
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128
+    cr = 0.5 * r - 0.418688 * g - 0.081312 * b + 128
+
+    def clamp(x: float) -> int:
+        return max(0, min(255, round(x)))
+
+    return clamp(y), clamp(cb), clamp(cr)
+
+
+# Nine symbols means nine category codes (0-8); JPEG_PATTERN_BLOCKS is 8x8 blocks of 8x8 pixels,
+# 64x64 overall, matching PATTERN_SIZE's own footprint from the other pixel fixtures.
+JPEG_PATTERN_GRID = 8
+
+
+def pattern_jpeg_block_grid() -> np.ndarray:
+    """Section 5: value(bx, by) = (160 if (bx+by) even else 96) + 2*by. The checkerboard makes
+    every adjacent DC difference non-zero; the row term pushes several categories through the coder."""
+    by, bx = np.mgrid[0:JPEG_PATTERN_GRID, 0:JPEG_PATTERN_GRID]
+    base = np.where((bx + by) % 2 == 0, 160, 96)
+    return (base + 2 * by).astype(int)
+
+
+def pattern_jpeg_rgb_blocks() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Section 5's R/G/B formulas, as (block_rows, block_cols) grids - not yet colour-converted."""
+    by, bx = np.mgrid[0:JPEG_PATTERN_GRID, 0:JPEG_PATTERN_GRID]
+    r = (32 + 28 * bx).astype(int)
+    g = (32 + 28 * by).astype(int)
+    b = np.where((bx + by) % 2 == 0, 160, 64).astype(int)
+    return r, g, b
+
+
+def pattern_jpeg_ycbcr_blocks() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    r, g, b = pattern_jpeg_rgb_blocks()
+    y = np.zeros_like(r)
+    cb = np.zeros_like(r)
+    cr = np.zeros_like(r)
+    for by in range(JPEG_PATTERN_GRID):
+        for bx in range(JPEG_PATTERN_GRID):
+            y[by, bx], cb[by, bx], cr[by, bx] = jpeg_rgb_to_ycbcr(int(r[by, bx]), int(g[by, bx]), int(b[by, bx]))
+    return y, cb, cr
+
+
+BURNED_IN_JPEG_BLOCK_COLS = 60
+BURNED_IN_JPEG_PHANTOM_BLOCK_ROWS = 24
+BURNED_IN_JPEG_BLOCK_ROWS = 32
+BURNED_IN_JPEG_ROWS = BURNED_IN_JPEG_BLOCK_ROWS * JPEG_BLOCK_SIZE  # 256
+BURNED_IN_JPEG_COLUMNS = BURNED_IN_JPEG_BLOCK_COLS * JPEG_BLOCK_SIZE  # 480
+BURNED_IN_JPEG_PHANTOM_MAX = 200
+BURNED_IN_JPEG_STRIP_VALUE = 64
+BURNED_IN_JPEG_TEXT_VALUE = 255
+BURNED_IN_JPEG_TEXT_ROW0 = 25
+BURNED_IN_JPEG_TEXT_COL0 = 3
+BURNED_IN_JPEG_GLYPH_WIDTH = 4
+BURNED_IN_JPEG_GLYPH_HEIGHT = 5
+BURNED_IN_JPEG_GLYPH_STRIDE = 5  # 4 wide + 1 column of spacing
+
+# 4x5 block glyphs - deliberately not the 8x12 pixel GLYPHS above, which are far larger than an
+# 8-pixel block can usefully subdivide. Same seven distinct letters TESTPATIENT needs.
+JPEG_GLYPHS: Dict[str, List[str]] = {
+    "T": ["1111", "0110", "0110", "0110", "0110"],
+    "E": ["1111", "1000", "1110", "1000", "1111"],
+    "S": ["0111", "1000", "0110", "0001", "1110"],
+    "P": ["1110", "1001", "1110", "1000", "1000"],
+    "A": ["0110", "1001", "1111", "1001", "1001"],
+    "I": ["1111", "0110", "0110", "0110", "1111"],
+    "N": ["1001", "1101", "1011", "1001", "1001"],
+}
+
+
+def burned_in_jpeg_bounding_box() -> Tuple[int, int, int, int]:
+    """(rowStart, colStart, rowEnd, colEnd) in BLOCK coordinates, end-exclusive."""
+    width = len(BURNED_IN_TEXT) * BURNED_IN_JPEG_GLYPH_STRIDE - 1  # no trailing gap after the last character
+    return (
+        BURNED_IN_JPEG_TEXT_ROW0,
+        BURNED_IN_JPEG_TEXT_COL0,
+        BURNED_IN_JPEG_TEXT_ROW0 + BURNED_IN_JPEG_GLYPH_HEIGHT,
+        BURNED_IN_JPEG_TEXT_COL0 + width,
+    )
+
+
+def burned_in_jpeg_blocks() -> np.ndarray:
+    """480x256, 60x32 blocks (section 5): a phantom ceilinged at 200 in block rows 0-23, a flat
+    strip at 64 in block rows 24-31, with TESTPATIENT at 255 in block rows 25-29."""
+    phantom_rows = BURNED_IN_JPEG_PHANTOM_BLOCK_ROWS * JPEG_BLOCK_SIZE
+    # Proportional to the phantom's own sampled region, the same reasoning 3.3 used for
+    # burned-in.dcm's 128x128 version: DISC_RADIUS was tuned for a 256-row canvas.
+    radius = DISC_RADIUS * phantom_rows // ROWS
+    phantom = make_phantom(rows=phantom_rows, columns=BURNED_IN_JPEG_COLUMNS, radius=radius, seed=PHANTOM_SEED)
+
+    sampled = np.zeros((BURNED_IN_JPEG_PHANTOM_BLOCK_ROWS, BURNED_IN_JPEG_BLOCK_COLS), dtype=float)
+    for by in range(BURNED_IN_JPEG_PHANTOM_BLOCK_ROWS):
+        for bx in range(BURNED_IN_JPEG_BLOCK_COLS):
+            sampled[by, bx] = phantom[by * JPEG_BLOCK_SIZE + 4, bx * JPEG_BLOCK_SIZE + 4]
+    lo, hi = float(sampled.min()), float(sampled.max())
+    scaled = np.round((sampled - lo) / (hi - lo) * BURNED_IN_JPEG_PHANTOM_MAX).astype(int)
+
+    blocks = np.full((BURNED_IN_JPEG_BLOCK_ROWS, BURNED_IN_JPEG_BLOCK_COLS), BURNED_IN_JPEG_STRIP_VALUE, dtype=int)
+    blocks[0:BURNED_IN_JPEG_PHANTOM_BLOCK_ROWS, :] = scaled
+
+    for i, ch in enumerate(BURNED_IN_TEXT):
+        for gy, row in enumerate(JPEG_GLYPHS[ch]):
+            for gx, bit in enumerate(row):
+                if bit == "1":
+                    by = BURNED_IN_JPEG_TEXT_ROW0 + gy
+                    bx = BURNED_IN_JPEG_TEXT_COL0 + i * BURNED_IN_JPEG_GLYPH_STRIDE + gx
+                    blocks[by, bx] = BURNED_IN_JPEG_TEXT_VALUE
+    return blocks
+
+
+JPEG_PATTERN_STUDY_UID = "2.25.424264068711928514640"  # sqrt(18)
+JPEG_PATTERN_SERIES_UID = "2.25.435889894354067355223"  # sqrt(19)
+JPEG_PATTERN_SOP_UID = "2.25.447213595499957939281"  # sqrt(20)
+JPEG_RGB_STUDY_UID = "2.25.458257569495584000658"  # sqrt(21)
+JPEG_RGB_SERIES_UID = "2.25.469041575982342955456"  # sqrt(22)
+JPEG_RGB_SOP_UID = "2.25.479583152331271954159"  # sqrt(23)
+BURNED_IN_JPEG_STUDY_UID = "2.25.489897948556635619639"  # sqrt(24)
+BURNED_IN_JPEG_SERIES_UID = "2.25.509901951359278483002"  # sqrt(26)
+BURNED_IN_JPEG_SOP_UID = "2.25.519615242270663188058"  # sqrt(27)
+
+
+def build_jpeg_dataset(
+    *,
+    sop_uid: str,
+    study_uid: str,
+    series_uid: str,
+    rows: int,
+    columns: int,
+    samples_per_pixel: int,
+    photometric: str,
+    patient_name: str,
+    jpeg_fragment: bytes,
+) -> Dataset:
+    ds = Dataset()
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = SECONDARY_CAPTURE_STORAGE
+    meta.MediaStorageSOPInstanceUID = sop_uid
+    meta.TransferSyntaxUID = JPEG_BASELINE_UID
+    meta.ImplementationClassUID = IMPLEMENTATION_CLASS_UID
+    ds.file_meta = meta
+    ds.preamble = b"\x00" * 128
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+
+    ds.SOPClassUID = SECONDARY_CAPTURE_STORAGE
+    ds.SOPInstanceUID = sop_uid
+    ds.StudyInstanceUID = study_uid
+    ds.SeriesInstanceUID = series_uid
+    ds.SeriesNumber = "1"
+    ds.InstanceNumber = "1"
+    ds.Modality = "OT"
+    ds.ConversionType = "WSD"
+    ds.PatientID = PIXELS_PATIENT_ID
+    ds.PatientName = patient_name
+
+    ds.Rows = rows
+    ds.Columns = columns
+    ds.BitsAllocated = 8
+    ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.PixelRepresentation = 0
+    ds.PhotometricInterpretation = photometric
+    ds.SamplesPerPixel = samples_per_pixel
+    if samples_per_pixel == 3:
+        ds.PlanarConfiguration = 0
+    ds.LossyImageCompression = "01"
+    ds.LossyImageCompressionMethod = "ISO_10918_1"
+
+    # No RescaleSlope/Intercept/WindowCenter/WindowWidth, deliberately (section 5): this is 8-bit
+    # lossy data a modality has already mapped, and these files carry no window at all.
+
+    frag = DataElement(Tag(0x7FE00010), "OB", encapsulate([jpeg_fragment]))
+    frag.is_undefined_length = True
+    ds[0x7FE00010] = frag
+
+    return ds
+
+
+def parse_jpeg_markers(data: bytes) -> Dict[str, Any]:
+    """A bespoke parser for exactly the marker sequence this encoder produces (section 8, checks 1
+    and 3) - not a general JPEG parser. Raises on anything inconsistent."""
+    if data[0:2] != b"\xFF\xD8":
+        raise SystemExit("JPEG fragment does not start with SOI")
+    pos = 2
+    found: Dict[str, Any] = {}
+    expected = [("APP0", 0xE0), ("DQT", 0xDB), ("SOF0", 0xC0), ("DHT0", 0xC4), ("DHT1", 0xC4), ("SOS", 0xDA)]
+    for name, marker_code in expected:
+        if data[pos] != 0xFF or data[pos + 1] != marker_code:
+            raise SystemExit(f"expected marker {name} (FF {marker_code:02X}) at offset {pos}, found {data[pos:pos+2].hex()}")
+        length = int.from_bytes(data[pos + 2 : pos + 4], "big")
+        found[name] = {"offset": pos, "length": length, "data": data[pos + 4 : pos + 2 + length]}
+        pos = pos + 2 + length
+        if name == "SOS":
+            entropy_start = pos
+
+    # Entropy data to EOI, accounting for byte stuffing - any FF not followed by 00 must be D9.
+    i = entropy_start
+    while True:
+        if data[i] == 0xFF:
+            nxt = data[i + 1]
+            if nxt == 0x00:
+                i += 2
+                continue
+            if nxt == 0xD9:
+                break
+            raise SystemExit(f"entropy data has FF {nxt:02X} at offset {i}, neither a stuff byte nor EOI")
+        i += 1
+    found["entropy"] = data[entropy_start:i]
+    found["EOI"] = {"offset": i}
+    trailer = data[i + 2 :]
+    # PS3.5 Annex A.4: an encapsulated fragment of odd length is padded to even with one 0x00 byte.
+    # decode_data_sequence() hands back the fragment exactly as pydicom's encapsulate() wrote it, pad
+    # included, so a well-formed fragment has either no trailer or exactly this one byte - never more.
+    if trailer not in (b"", b"\x00"):
+        raise SystemExit(f"{len(trailer)} unexpected byte(s) after EOI: {trailer.hex()}")
+    if trailer == b"\x00" and (i + 2) % 2 == 0:
+        raise SystemExit("one 0x00 byte after EOI, but the fragment was already even length")
+    return found
+
+
+def jpeg_fragment_manifest_entry(
+    *,
+    file_name: str,
+    rows: int,
+    columns: int,
+    samples_per_pixel: int,
+    planar_configuration: Optional[int],
+    photometric: str,
+    block_formula: str,
+    jpeg_fragment: bytes,
+    stuff_count: int,
+    pixel_data: bytes,
+    coords: List[dict],
+    tolerance: int,
+) -> dict:
+    fp = DicomBytesIO(pixel_data)
+    fp.is_little_endian = True
+    has_bot, _offsets = get_frame_offsets(fp)
+    fragments = decode_data_sequence(pixel_data)
+    return {
+        "file": file_name,
+        "transferSyntaxUid": JPEG_BASELINE_UID,
+        "rows": rows,
+        "columns": columns,
+        "bitsAllocated": 8,
+        "bitsStored": 8,
+        "highBit": 7,
+        "pixelRepresentation": 0,
+        "photometricInterpretation": photometric,
+        "samplesPerPixel": samples_per_pixel,
+        "planarConfiguration": planar_configuration,
+        "numberOfFrames": 1,
+        "blockSize": JPEG_BLOCK_SIZE,
+        "blockFormula": block_formula,
+        "jpegFragmentSha256": hashlib.sha256(jpeg_fragment).hexdigest(),
+        "jpegFragmentLength": len(jpeg_fragment),
+        # PS3.5 Annex A.4: an odd-length fragment is padded to even inside its encapsulation item
+        # with one 0x00 byte after EOI. A decoder (including the browser's own, in 3.6) is handed
+        # this item's bytes verbatim, so it is the one of these two lengths it actually has to cope
+        # with trailing-byte-after-EOI on.
+        "jpegFragmentEncapsulatedLength": len(fragments[0]),
+        "jpegFragmentPadded": len(jpeg_fragment) % 2 == 1,
+        "pixelDataSha256": hashlib.sha256(pixel_data).hexdigest(),
+        "fragmentCount": len(fragments),
+        "hasBasicOffsetTable": has_bot,
+        "stuffByteCount": stuff_count,
+        "expectedOutput": coords,
+        "tolerance": tolerance,
+    }
+
+
+def build_jpeg_pixels(root: Path) -> None:
+    directory = root / PIXELS_DIR_REL
+    manifest_path = root / PIXELS_MANIFEST_REL
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    def ok(message: str, condition: bool) -> None:
+        if not condition:
+            raise SystemExit(f"jpeg pixel check FAILED: {message}")
+        print(f"  ok  {message}")
+
+    print("jpeg checks:")
+
+    # --- pattern-jpeg.dcm ---
+    pattern_blocks = pattern_jpeg_block_grid()
+    pattern_rows = pattern_cols = JPEG_PATTERN_GRID * JPEG_BLOCK_SIZE
+    pattern_jpeg_bytes, pattern_stuff = encode_jpeg_baseline([pattern_blocks], pattern_rows, pattern_cols)
+
+    markers = parse_jpeg_markers(pattern_jpeg_bytes)
+    ok(
+        "pattern-jpeg.dcm's entropy data begins FD 03 F9 followed by the bits 111110",
+        markers["entropy"][:3] == bytes.fromhex("fd03f9") and format(markers["entropy"][3], "08b")[:6] == "111110",
+    )
+
+    def coord_entries_grayscale(blocks: np.ndarray, *, invert: bool = False) -> List[dict]:
+        coords = [(0, 0), (7, 0), (8, 0), (63, 0), (0, 63), (63, 63), (32, 32), (31, 32)]
+        return [
+            {
+                "x": x, "y": y, "blockX": x // JPEG_BLOCK_SIZE, "blockY": y // JPEG_BLOCK_SIZE,
+                "value": (255 - int(blocks[y // JPEG_BLOCK_SIZE, x // JPEG_BLOCK_SIZE])) if invert else int(blocks[y // JPEG_BLOCK_SIZE, x // JPEG_BLOCK_SIZE]),
+            }
+            for x, y in coords
+        ]
+
+    pattern_coords = coord_entries_grayscale(pattern_blocks)
+    # decodeImage() applies MONOCHROME1's 255-y inversion identically for JPEG and uncompressed
+    # data (src/pixels/decode.ts's `invert` flag doesn't branch on transfer syntax), so this matches
+    # pattern-mono1.dcm's own convention (3.1/3.2): expectedOutput here is what decodeImage returns,
+    # not the raw JPEG sample - the same meaning that key has on every other entry in this manifest.
+    pattern_coords_mono1 = coord_entries_grayscale(pattern_blocks, invert=True)
+    pattern_formula = "value(bx, by) = (160 if (bx + by) % 2 == 0 else 96) + 2 * by, for bx, by each in [0, 8)"
+
+    datasets: Dict[str, Dataset] = {}
+    datasets["pattern-jpeg.dcm"] = build_jpeg_dataset(
+        sop_uid=JPEG_PATTERN_SOP_UID, study_uid=JPEG_PATTERN_STUDY_UID, series_uid=JPEG_PATTERN_SERIES_UID,
+        rows=pattern_rows, columns=pattern_cols, samples_per_pixel=1, photometric="MONOCHROME2",
+        patient_name="SCANLINT^PIXELTEST", jpeg_fragment=pattern_jpeg_bytes,
+    )
+
+    # --- pattern-jpeg-mono1.dcm: the same JPEG bytes, only PhotometricInterpretation differs ---
+    datasets["pattern-jpeg-mono1.dcm"] = build_jpeg_dataset(
+        sop_uid=JPEG_PATTERN_SOP_UID, study_uid=JPEG_PATTERN_STUDY_UID, series_uid=JPEG_PATTERN_SERIES_UID,
+        rows=pattern_rows, columns=pattern_cols, samples_per_pixel=1, photometric="MONOCHROME1",
+        patient_name="SCANLINT^PIXELTEST", jpeg_fragment=pattern_jpeg_bytes,
+    )
+
+    # --- pattern-jpeg-rgb.dcm ---
+    y_blocks, cb_blocks, cr_blocks = pattern_jpeg_ycbcr_blocks()
+    rgb_jpeg_bytes, rgb_stuff = encode_jpeg_baseline([y_blocks, cb_blocks, cr_blocks], pattern_rows, pattern_cols)
+    r_blocks, g_blocks, b_blocks = pattern_jpeg_rgb_blocks()
+
+    def coord_entries_rgb() -> List[dict]:
+        coords = [(0, 0), (7, 0), (8, 0), (63, 0), (0, 63), (63, 63), (32, 32), (31, 32)]
+        entries = []
+        for x, y in coords:
+            bx, by = x // JPEG_BLOCK_SIZE, y // JPEG_BLOCK_SIZE
+            entries.append(
+                {
+                    "x": x, "y": y, "blockX": bx, "blockY": by,
+                    "rgb": [int(r_blocks[by, bx]), int(g_blocks[by, bx]), int(b_blocks[by, bx])],
+                    "ycbcr": [int(y_blocks[by, bx]), int(cb_blocks[by, bx]), int(cr_blocks[by, bx])],
+                }
+            )
+        return entries
+
+    datasets["pattern-jpeg-rgb.dcm"] = build_jpeg_dataset(
+        sop_uid=JPEG_RGB_SOP_UID, study_uid=JPEG_RGB_STUDY_UID, series_uid=JPEG_RGB_SERIES_UID,
+        rows=pattern_rows, columns=pattern_cols, samples_per_pixel=3, photometric="YBR_FULL",
+        patient_name="SCANLINT^PIXELTEST", jpeg_fragment=rgb_jpeg_bytes,
+    )
+
+    # --- burned-in-jpeg.dcm ---
+    burned_blocks = burned_in_jpeg_blocks()
+    burned_jpeg_bytes, burned_stuff = encode_jpeg_baseline([burned_blocks], BURNED_IN_JPEG_ROWS, BURNED_IN_JPEG_COLUMNS)
+    bb_row0, bb_col0, bb_row1, bb_col1 = burned_in_jpeg_bounding_box()
+
+    def coord_entries_burned() -> List[dict]:
+        coords = [
+            (0, 0), (479, 191),  # phantom: top-left corner, far corner of the phantom region
+            (0, 192), (479, 255),  # the flat strip, outside the text's own rows
+            (24, 200), (71, 207),  # inside text blocks (T's and E's own glyph cells)
+            (59, 204), (28, 212),  # inside the bounding box but not drawn: the inter-letter gap, and a 0 bit within T
+        ]
+        return [
+            {"x": x, "y": y, "blockX": x // JPEG_BLOCK_SIZE, "blockY": y // JPEG_BLOCK_SIZE, "value": int(burned_blocks[y // JPEG_BLOCK_SIZE, x // JPEG_BLOCK_SIZE])}
+            for x, y in coords
+        ]
+
+    burned_coords = coord_entries_burned()
+    datasets["burned-in-jpeg.dcm"] = build_jpeg_dataset(
+        sop_uid=BURNED_IN_JPEG_SOP_UID, study_uid=BURNED_IN_JPEG_STUDY_UID, series_uid=BURNED_IN_JPEG_SERIES_UID,
+        rows=BURNED_IN_JPEG_ROWS, columns=BURNED_IN_JPEG_COLUMNS, samples_per_pixel=1, photometric="MONOCHROME2",
+        patient_name="TESTPATIENT^SCANLINT", jpeg_fragment=burned_jpeg_bytes,
+    )
+    datasets["burned-in-jpeg.dcm"].BurnedInAnnotation = "NO"
+
+    for name, ds in datasets.items():
+        ds.save_as(str(directory / name), write_like_original=False)
+
+    # --- section 8's checks ---
+
+    for name, ds in datasets.items():
+        markers_i = parse_jpeg_markers(bytes(decode_data_sequence(ds.PixelData)[0]))
+        sof0 = markers_i["SOF0"]["data"]
+        sof_rows = int.from_bytes(sof0[1:3], "big")
+        sof_cols = int.from_bytes(sof0[3:5], "big")
+        nf = sof0[5]
+        sampling_ok = all(sof0[6 + 3 * k + 1] == 0x11 for k in range(nf))
+        if not (sof_rows == ds.Rows and sof_cols == ds.Columns and nf == ds.SamplesPerPixel and sampling_ok):
+            raise SystemExit(f"{name}: SOF0 does not match Rows/Columns/SamplesPerPixel, or sampling is not 1x1")
+    ok("every SOF0 matches Rows/Columns/SamplesPerPixel, with every sampling factor 1", True)
+
+    ok("the entropy data contains no 0xFF followed by anything other than 0x00 (checked while parsing markers)", True)
+
+    ok(
+        "pattern-jpeg.dcm and pattern-jpeg-mono1.dcm carry byte-identical JPEG fragments",
+        decode_data_sequence(datasets["pattern-jpeg.dcm"].PixelData)[0] == decode_data_sequence(datasets["pattern-jpeg-mono1.dcm"].PixelData)[0],
+    )
+
+    for name, ds in datasets.items():
+        fp = DicomBytesIO(ds.PixelData)
+        fp.is_little_endian = True
+        has_bot, _ = get_frame_offsets(fp)
+        fragments = decode_data_sequence(ds.PixelData)
+        if not (has_bot and len(fragments) == 1):
+            raise SystemExit(f"{name}: expected a Basic Offset Table and exactly one fragment")
+    ok("every file's encapsulated PixelData has a Basic Offset Table and exactly one fragment", True)
+
+    for name, ds in datasets.items():
+        text = str(pydicom.dcmread(str(directory / name)))
+        if "(7fe0, 0010)" not in text.lower():
+            raise SystemExit(f"{name}: pydicom's dump shows no pixel data")
+    ok("every file reads as valid DICOM through pydicom's own dump", True)
+
+    burned_ds = datasets["burned-in-jpeg.dcm"]
+    inside = burned_blocks[bb_row0:bb_row1, bb_col0:bb_col1]
+    outside_mask = np.ones_like(burned_blocks, dtype=bool)
+    outside_mask[bb_row0:bb_row1, bb_col0:bb_col1] = False
+    text_mask = np.zeros_like(burned_blocks, dtype=bool)
+    for i, ch in enumerate(BURNED_IN_TEXT):
+        for gy, row in enumerate(JPEG_GLYPHS[ch]):
+            for gx, bit in enumerate(row):
+                if bit == "1":
+                    text_mask[BURNED_IN_JPEG_TEXT_ROW0 + gy, BURNED_IN_JPEG_TEXT_COL0 + i * BURNED_IN_JPEG_GLYPH_STRIDE + gx] = True
+    ok(
+        "burned-in-jpeg.dcm declares NO; every block in the text bounding box is 255 or 64, exactly "
+        "the text blocks are 255, and no block outside it is 255",
+        str(burned_ds.BurnedInAnnotation) == "NO"
+        and bool(np.isin(inside, [BURNED_IN_JPEG_TEXT_VALUE, BURNED_IN_JPEG_STRIP_VALUE]).all())
+        and bool((burned_blocks[text_mask] == BURNED_IN_JPEG_TEXT_VALUE).all())
+        and bool((burned_blocks[bb_row0:bb_row1, bb_col0:bb_col1][~text_mask[bb_row0:bb_row1, bb_col0:bb_col1]] == BURNED_IN_JPEG_STRIP_VALUE).all())
+        and not bool((burned_blocks[outside_mask] == BURNED_IN_JPEG_TEXT_VALUE).any()),
+    )
+
+    # --- manifest entries, appended to the one existing fixtures/pixels.manifest.json ---
+
+    jpeg_entries = [
+        jpeg_fragment_manifest_entry(
+            file_name="pattern-jpeg.dcm", rows=pattern_rows, columns=pattern_cols, samples_per_pixel=1,
+            planar_configuration=None, photometric="MONOCHROME2", block_formula=pattern_formula,
+            jpeg_fragment=pattern_jpeg_bytes, stuff_count=pattern_stuff,
+            pixel_data=datasets["pattern-jpeg.dcm"].PixelData, coords=pattern_coords, tolerance=0,
+        ),
+        {
+            **jpeg_fragment_manifest_entry(
+                file_name="pattern-jpeg-mono1.dcm", rows=pattern_rows, columns=pattern_cols, samples_per_pixel=1,
+                planar_configuration=None, photometric="MONOCHROME1", block_formula=pattern_formula,
+                jpeg_fragment=pattern_jpeg_bytes, stuff_count=pattern_stuff,
+                pixel_data=datasets["pattern-jpeg-mono1.dcm"].PixelData, coords=pattern_coords_mono1, tolerance=0,
+            ),
+            "note": "The JPEG bytes are byte-identical to pattern-jpeg.dcm's - only "
+                    "PhotometricInterpretation differs - but expectedOutput is 255 minus "
+                    "pattern-jpeg.dcm's value at each coordinate, not the raw JPEG-decoded sample. "
+                    "Every entry in this manifest uses expectedOutput to mean 'what decodeImage() "
+                    "returns', matching pattern-mono1.dcm's own convention (see patternFormula / 3.1 "
+                    "and 3.2): MONOCHROME1's 255-y inversion is applied after decode, not deferred.",
+        },
+        jpeg_fragment_manifest_entry(
+            file_name="pattern-jpeg-rgb.dcm", rows=pattern_rows, columns=pattern_cols, samples_per_pixel=3,
+            planar_configuration=0, photometric="YBR_FULL", block_formula=(
+                "R(bx, by) = 32 + 28 * bx; G(bx, by) = 32 + 28 * by; "
+                "B(bx, by) = 160 if (bx + by) % 2 == 0 else 64, for bx, by each in [0, 8)"
+            ),
+            jpeg_fragment=rgb_jpeg_bytes, stuff_count=rgb_stuff,
+            pixel_data=datasets["pattern-jpeg-rgb.dcm"].PixelData, coords=coord_entries_rgb(), tolerance=3,
+        ),
+        {
+            **jpeg_fragment_manifest_entry(
+                file_name="burned-in-jpeg.dcm", rows=BURNED_IN_JPEG_ROWS, columns=BURNED_IN_JPEG_COLUMNS, samples_per_pixel=1,
+                planar_configuration=None, photometric="MONOCHROME2", block_formula=(
+                    "block rows 0-23: make_phantom, sampled at each block's centre, scaled to 0-200; "
+                    "block rows 24-31: 64, except TESTPATIENT at 255 in block rows 25-29 starting at block column 3"
+                ),
+                jpeg_fragment=burned_jpeg_bytes, stuff_count=burned_stuff,
+                pixel_data=burned_ds.PixelData, coords=burned_coords, tolerance=0,
+            ),
+            "burnedInAnnotation": {
+                "declared": "NO",
+                "deliberatelyFalse": True,
+                "note": "The declaration is deliberately false, as burned-in.dcm's is and for the same "
+                        "reason (3.1): the pixels contain the legible text 'TESTPATIENT' - matching this "
+                        "file's own PatientName - while the metadata declares no burned-in annotation.",
+                "text": BURNED_IN_TEXT,
+                "boundingBox": {"rowStart": bb_row0 * JPEG_BLOCK_SIZE, "colStart": bb_col0 * JPEG_BLOCK_SIZE, "rowEnd": bb_row1 * JPEG_BLOCK_SIZE, "colEnd": bb_col1 * JPEG_BLOCK_SIZE},
+                "textValue": BURNED_IN_JPEG_TEXT_VALUE,
+                "stripValue": BURNED_IN_JPEG_STRIP_VALUE,
+            },
+        },
+    ]
+
+    manifest["files"].extend(jpeg_entries)
+    manifest["jpegFormat"] = {
+        "transferSyntaxUid": JPEG_BASELINE_UID,
+        "note": "JPEG Baseline (Process 1), DC-coefficient-only: every fixture image is a grid of "
+                "8x8 blocks, each block one constant value, encoded with a from-scratch encoder "
+                "(see scripts/make-sample-study.py) rather than a general JPEG library. The DC "
+                "Huffman table (class 0, id 0) has nine symbols, one per code length 1-9, assigning "
+                "category t the code 't ones then a zero'; the AC table (class 1, id 0) has a "
+                "single symbol, end-of-block, coded as the single bit 0. The quantisation table "
+                "(id 0) has every entry equal to 8.",
+        "noExpectedRgbaHash": "The generator has no JPEG decoder and will not acquire one, so there "
+                "is no expected-RGBA hash here, unlike the uncompressed pixel fixtures. The oracle "
+                "is the intended per-block values recorded in expectedOutput, plus tolerance - "
+                "checked against a real decode in a browser in 3.6. This is deliberate, not an "
+                "oversight.",
+    }
+
+    manifest_path.write_bytes((json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
+
+    print(f"wrote {len(jpeg_entries)} JPEG fixture(s) to {directory}")
+    for name in ["pattern-jpeg.dcm", "pattern-jpeg-mono1.dcm", "pattern-jpeg-rgb.dcm", "burned-in-jpeg.dcm"]:
+        p = directory / name
+        print(f"  {name:<22} {p.stat().st_size:>7} bytes  sha256 {_sha(p)}")
+    print(f"  stuff bytes: pattern-jpeg.dcm={pattern_stuff}  pattern-jpeg-rgb.dcm={rgb_stuff}  burned-in-jpeg.dcm={burned_stuff}  (pattern-jpeg-mono1.dcm shares pattern-jpeg.dcm's fragment)")
+    print(f"wrote {manifest_path} ({manifest_path.stat().st_size} bytes, sha256 {_sha(manifest_path)})")
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -1597,6 +2290,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     build_series(root)
     build_pixels(root)
+    build_jpeg_pixels(root)
 
 
 if __name__ == "__main__":

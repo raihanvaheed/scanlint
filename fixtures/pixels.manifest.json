@@ -715,6 +715,430 @@
         "textValue": 4095,
         "background": "make_phantom(rows=128, columns=128) - a disc on a gradient with noise, not a uniform value"
       }
+    },
+    {
+      "file": "pattern-jpeg.dcm",
+      "transferSyntaxUid": "1.2.840.10008.1.2.4.50",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 8,
+      "bitsStored": 8,
+      "highBit": 7,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME2",
+      "samplesPerPixel": 1,
+      "planarConfiguration": null,
+      "numberOfFrames": 1,
+      "blockSize": 8,
+      "blockFormula": "value(bx, by) = (160 if (bx + by) % 2 == 0 else 96) + 2 * by, for bx, by each in [0, 8)",
+      "jpegFragmentSha256": "4fbebe6da3e44cdc4ae52b972039db3b653f09811e1cec2a5ac36ec9c6b2e678",
+      "jpegFragmentLength": 285,
+      "jpegFragmentEncapsulatedLength": 286,
+      "jpegFragmentPadded": true,
+      "pixelDataSha256": "91b5b225d102624c482c524b1b6314171e44d07eb05dd4e87cbaa25ddd2a4a5a",
+      "fragmentCount": 1,
+      "hasBasicOffsetTable": true,
+      "stuffByteCount": 0,
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "blockX": 0,
+          "blockY": 0,
+          "value": 160
+        },
+        {
+          "x": 7,
+          "y": 0,
+          "blockX": 0,
+          "blockY": 0,
+          "value": 160
+        },
+        {
+          "x": 8,
+          "y": 0,
+          "blockX": 1,
+          "blockY": 0,
+          "value": 96
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "blockX": 7,
+          "blockY": 0,
+          "value": 96
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "blockX": 0,
+          "blockY": 7,
+          "value": 110
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "blockX": 7,
+          "blockY": 7,
+          "value": 174
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "blockX": 4,
+          "blockY": 4,
+          "value": 168
+        },
+        {
+          "x": 31,
+          "y": 32,
+          "blockX": 3,
+          "blockY": 4,
+          "value": 104
+        }
+      ],
+      "tolerance": 0
+    },
+    {
+      "file": "pattern-jpeg-mono1.dcm",
+      "transferSyntaxUid": "1.2.840.10008.1.2.4.50",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 8,
+      "bitsStored": 8,
+      "highBit": 7,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME1",
+      "samplesPerPixel": 1,
+      "planarConfiguration": null,
+      "numberOfFrames": 1,
+      "blockSize": 8,
+      "blockFormula": "value(bx, by) = (160 if (bx + by) % 2 == 0 else 96) + 2 * by, for bx, by each in [0, 8)",
+      "jpegFragmentSha256": "4fbebe6da3e44cdc4ae52b972039db3b653f09811e1cec2a5ac36ec9c6b2e678",
+      "jpegFragmentLength": 285,
+      "jpegFragmentEncapsulatedLength": 286,
+      "jpegFragmentPadded": true,
+      "pixelDataSha256": "91b5b225d102624c482c524b1b6314171e44d07eb05dd4e87cbaa25ddd2a4a5a",
+      "fragmentCount": 1,
+      "hasBasicOffsetTable": true,
+      "stuffByteCount": 0,
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "blockX": 0,
+          "blockY": 0,
+          "value": 95
+        },
+        {
+          "x": 7,
+          "y": 0,
+          "blockX": 0,
+          "blockY": 0,
+          "value": 95
+        },
+        {
+          "x": 8,
+          "y": 0,
+          "blockX": 1,
+          "blockY": 0,
+          "value": 159
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "blockX": 7,
+          "blockY": 0,
+          "value": 159
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "blockX": 0,
+          "blockY": 7,
+          "value": 145
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "blockX": 7,
+          "blockY": 7,
+          "value": 81
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "blockX": 4,
+          "blockY": 4,
+          "value": 87
+        },
+        {
+          "x": 31,
+          "y": 32,
+          "blockX": 3,
+          "blockY": 4,
+          "value": 151
+        }
+      ],
+      "tolerance": 0,
+      "note": "The JPEG bytes are byte-identical to pattern-jpeg.dcm's - only PhotometricInterpretation differs - but expectedOutput is 255 minus pattern-jpeg.dcm's value at each coordinate, not the raw JPEG-decoded sample. Every entry in this manifest uses expectedOutput to mean 'what decodeImage() returns', matching pattern-mono1.dcm's own convention (see patternFormula / 3.1 and 3.2): MONOCHROME1's 255-y inversion is applied after decode, not deferred."
+    },
+    {
+      "file": "pattern-jpeg-rgb.dcm",
+      "transferSyntaxUid": "1.2.840.10008.1.2.4.50",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 8,
+      "bitsStored": 8,
+      "highBit": 7,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "YBR_FULL",
+      "samplesPerPixel": 3,
+      "planarConfiguration": 0,
+      "numberOfFrames": 1,
+      "blockSize": 8,
+      "blockFormula": "R(bx, by) = 32 + 28 * bx; G(bx, by) = 32 + 28 * by; B(bx, by) = 160 if (bx + by) % 2 == 0 else 64, for bx, by each in [0, 8)",
+      "jpegFragmentSha256": "48785c41cd8ee8070688ce78bafc11696567402331e60ad6584342754644540f",
+      "jpegFragmentLength": 449,
+      "jpegFragmentEncapsulatedLength": 450,
+      "jpegFragmentPadded": true,
+      "pixelDataSha256": "482775afd1efa7b92c696e17b8db6681860d5022be3f94e9786ac09b71c74a31",
+      "fragmentCount": 1,
+      "hasBasicOffsetTable": true,
+      "stuffByteCount": 0,
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "blockX": 0,
+          "blockY": 0,
+          "rgb": [
+            32,
+            32,
+            160
+          ],
+          "ycbcr": [
+            47,
+            192,
+            118
+          ]
+        },
+        {
+          "x": 7,
+          "y": 0,
+          "blockX": 0,
+          "blockY": 0,
+          "rgb": [
+            32,
+            32,
+            160
+          ],
+          "ycbcr": [
+            47,
+            192,
+            118
+          ]
+        },
+        {
+          "x": 8,
+          "y": 0,
+          "blockX": 1,
+          "blockY": 0,
+          "rgb": [
+            60,
+            32,
+            64
+          ],
+          "ycbcr": [
+            44,
+            139,
+            139
+          ]
+        },
+        {
+          "x": 63,
+          "y": 0,
+          "blockX": 7,
+          "blockY": 0,
+          "rgb": [
+            228,
+            32,
+            64
+          ],
+          "ycbcr": [
+            94,
+            111,
+            223
+          ]
+        },
+        {
+          "x": 0,
+          "y": 63,
+          "blockX": 0,
+          "blockY": 7,
+          "rgb": [
+            32,
+            228,
+            64
+          ],
+          "ycbcr": [
+            151,
+            79,
+            43
+          ]
+        },
+        {
+          "x": 63,
+          "y": 63,
+          "blockX": 7,
+          "blockY": 7,
+          "rgb": [
+            228,
+            228,
+            160
+          ],
+          "ycbcr": [
+            220,
+            94,
+            134
+          ]
+        },
+        {
+          "x": 32,
+          "y": 32,
+          "blockX": 4,
+          "blockY": 4,
+          "rgb": [
+            144,
+            144,
+            160
+          ],
+          "ycbcr": [
+            146,
+            136,
+            127
+          ]
+        },
+        {
+          "x": 31,
+          "y": 32,
+          "blockX": 3,
+          "blockY": 4,
+          "rgb": [
+            116,
+            144,
+            64
+          ],
+          "ycbcr": [
+            127,
+            93,
+            121
+          ]
+        }
+      ],
+      "tolerance": 3
+    },
+    {
+      "file": "burned-in-jpeg.dcm",
+      "transferSyntaxUid": "1.2.840.10008.1.2.4.50",
+      "rows": 256,
+      "columns": 480,
+      "bitsAllocated": 8,
+      "bitsStored": 8,
+      "highBit": 7,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME2",
+      "samplesPerPixel": 1,
+      "planarConfiguration": null,
+      "numberOfFrames": 1,
+      "blockSize": 8,
+      "blockFormula": "block rows 0-23: make_phantom, sampled at each block's centre, scaled to 0-200; block rows 24-31: 64, except TESTPATIENT at 255 in block rows 25-29 starting at block column 3",
+      "jpegFragmentSha256": "f30f210e5c2c550ee29a94bf2d2ed44898b93adf55b898718db646ec5b0e24ce",
+      "jpegFragmentLength": 1312,
+      "jpegFragmentEncapsulatedLength": 1312,
+      "jpegFragmentPadded": false,
+      "pixelDataSha256": "24f598397d9373adda89a63cc9d2fb30a00f04808c3febd24548bf85970b4889",
+      "fragmentCount": 1,
+      "hasBasicOffsetTable": true,
+      "stuffByteCount": 30,
+      "expectedOutput": [
+        {
+          "x": 0,
+          "y": 0,
+          "blockX": 0,
+          "blockY": 0,
+          "value": 0
+        },
+        {
+          "x": 479,
+          "y": 191,
+          "blockX": 59,
+          "blockY": 23,
+          "value": 56
+        },
+        {
+          "x": 0,
+          "y": 192,
+          "blockX": 0,
+          "blockY": 24,
+          "value": 64
+        },
+        {
+          "x": 479,
+          "y": 255,
+          "blockX": 59,
+          "blockY": 31,
+          "value": 64
+        },
+        {
+          "x": 24,
+          "y": 200,
+          "blockX": 3,
+          "blockY": 25,
+          "value": 255
+        },
+        {
+          "x": 71,
+          "y": 207,
+          "blockX": 8,
+          "blockY": 25,
+          "value": 255
+        },
+        {
+          "x": 59,
+          "y": 204,
+          "blockX": 7,
+          "blockY": 25,
+          "value": 64
+        },
+        {
+          "x": 28,
+          "y": 212,
+          "blockX": 3,
+          "blockY": 26,
+          "value": 64
+        }
+      ],
+      "tolerance": 0,
+      "burnedInAnnotation": {
+        "declared": "NO",
+        "deliberatelyFalse": true,
+        "note": "The declaration is deliberately false, as burned-in.dcm's is and for the same reason (3.1): the pixels contain the legible text 'TESTPATIENT' - matching this file's own PatientName - while the metadata declares no burned-in annotation.",
+        "text": "TESTPATIENT",
+        "boundingBox": {
+          "rowStart": 200,
+          "colStart": 24,
+          "rowEnd": 240,
+          "colEnd": 456
+        },
+        "textValue": 255,
+        "stripValue": 64
+      }
     }
-  ]
+  ],
+  "jpegFormat": {
+    "transferSyntaxUid": "1.2.840.10008.1.2.4.50",
+    "note": "JPEG Baseline (Process 1), DC-coefficient-only: every fixture image is a grid of 8x8 blocks, each block one constant value, encoded with a from-scratch encoder (see scripts/make-sample-study.py) rather than a general JPEG library. The DC Huffman table (class 0, id 0) has nine symbols, one per code length 1-9, assigning category t the code 't ones then a zero'; the AC table (class 1, id 0) has a single symbol, end-of-block, coded as the single bit 0. The quantisation table (id 0) has every entry equal to 8.",
+    "noExpectedRgbaHash": "The generator has no JPEG decoder and will not acquire one, so there is no expected-RGBA hash here, unlike the uncompressed pixel fixtures. The oracle is the intended per-block values recorded in expectedOutput, plus tolerance - checked against a real decode in a browser in 3.6. This is deliberate, not an oversight."
+  }
 }
