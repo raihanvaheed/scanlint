@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Extract the DICOM data dictionary (PS3.6 Tables 6-1, 7-1 and 8-1) from the standard's
-published DocBook XML into two files:
+"""Extract the DICOM data dictionary (PS3.6 Tables 6-1, 7-1 and 8-1), and the transfer syntax
+registry (PS3.6 Annex A, Table A-1), from the standard's published DocBook XML into three files:
 
   src/model/dictionary.json          shipped: tag -> { name, vr? }, plus repeating-group patterns
   fixtures/dictionary-keywords.json  test-only: tag -> keyword, kept out of the build graph
+  src/pixels/transfer-syntaxes.json  shipped: every Table A-1 UID whose type is Transfer Syntax
 
 Run by hand; CI does not run it. Python 3.9+, standard library only:
-  python3 scripts/extract-dictionary.py [--out PATH] [--keywords-out PATH] [--url URL]
+  python3 scripts/extract-dictionary.py [--out PATH] [--keywords-out PATH] [--transfer-syntaxes-out PATH] [--url URL]
 
 Structure is checked strictly and the script exits non-zero on any surprise, so a changed
 layout in a future edition fails here rather than writing bad data. Every row it cannot use
 is reported, grouped by reason.
 
 The edition is read from the document and compared with src/model/annex-e.json's. Two tables
-from different editions can disagree silently, so a mismatch stops the script.
+from different editions can disagree silently, so a mismatch stops the script. Table A-1 comes
+from the same fetched document and so is always the same edition as the dictionary tables by
+construction; its own output file records that edition too, the same precedent 1.2 set for
+src/model/annex-e.json.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from typing import Any, Dict, List, NoReturn, Optional, Tuple
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = REPO_ROOT / "src" / "model" / "dictionary.json"
 DEFAULT_KEYWORDS_OUT = REPO_ROOT / "fixtures" / "dictionary-keywords.json"
+DEFAULT_TRANSFER_SYNTAXES_OUT = REPO_ROOT / "src" / "pixels" / "transfer-syntaxes.json"
 ANNEX_E_PATH = REPO_ROOT / "src" / "model" / "annex-e.json"
 DEFAULT_URL = "https://dicom.nema.org/medical/dicom/current/source/docbook/part06/part06.xml"
 
@@ -38,12 +43,16 @@ TABLE_IDS = ["table_6-1", "table_7-1", "table_8-1"]
 SOURCE_LABEL = "PS3.6 Tables 6-1, 7-1, 8-1"
 SHIPPED_LIMIT = 500 * 1024
 
+UID_TABLE_ID = "table_A-1"
+UID_TRANSFER_SYNTAX_LIMIT = 50 * 1024
+
 DB = "{http://docbook.org/ns/docbook}"
 XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 ZERO_WIDTH_SPACE = "\u200b"
 
 CONCRETE_TAG = re.compile(r"^\(([0-9A-Fa-f]{4}),([0-9A-Fa-f]{4})\)$")
 PATTERN_TAG = re.compile(r"^\(([0-9A-Fa-fx]{4}),([0-9A-Fa-fx]{4})\)$")
+CONCRETE_UID = re.compile(r"^\d+(\.\d+)+$")
 # The VR column holds this instead of a VR on a few rows whose VR depends on context.
 NOT_A_VR = {"See Note"}
 
@@ -109,9 +118,7 @@ def read_table(root: ET.Element, table_id: str) -> List[List[str]]:
     return rows
 
 
-def parse(xml_bytes: bytes) -> Dict[str, Any]:
-    root = ET.fromstring(xml_bytes)
-
+def parse(root: ET.Element) -> Dict[str, Any]:
     subtitle = root.find(f"{DB}subtitle")
     match = re.search(r"PS3\.6\s+(\S+)\s+-", "".join(subtitle.itertext()) if subtitle is not None else "")
     if not match:
@@ -194,6 +201,61 @@ def parse(xml_bytes: bytes) -> Dict[str, Any]:
     }
 
 
+def clean_uid_field(text: str) -> str:
+    """UID values and keywords in Table A-1 use U+200B purely as a line-break hint inside a dotted
+    number or a run-together identifier - never standing in for a space a reader would type - so it
+    is always stripped, never replaced. Unlike the attribute names in clean_name, there is no
+    per-row judgement call here."""
+    return text.replace(ZERO_WIDTH_SPACE, "").strip()
+
+
+def parse_transfer_syntaxes(root: ET.Element, edition: str) -> Dict[str, Any]:
+    """PS3.6 Annex A, Table A-1: the UID registry. Pulls out every row whose UID Type is
+    'Transfer Syntax'. Checked as strictly as the dictionary tables - a changed column layout in a
+    future edition must fail here, not silently produce a table with the wrong UIDs in it."""
+    tables = [t for t in root.iter(f"{DB}table") if t.get(XML_ID) == UID_TABLE_ID]
+    if len(tables) != 1:
+        fail(f"expected one table with xml:id {UID_TABLE_ID!r}, found {len(tables)}")
+    table = tables[0]
+
+    thead = table.find(f"{DB}thead")
+    tbody = table.find(f"{DB}tbody")
+    if thead is None or tbody is None or len(thead.findall(f"{DB}tr")) != 1:
+        fail(f"{UID_TABLE_ID}: expected one header row and a body")
+    headers = [clean_uid_field(cell_text(th)) for th in thead.iter(f"{DB}th")]
+    if headers != ["UID Value", "UID Name", "UID Keyword", "UID Type", "Part"]:
+        fail(f"{UID_TABLE_ID}: unexpected header cells {headers}")
+
+    transfer_syntaxes: Dict[str, Dict[str, str]] = {}
+    total_rows = 0
+    for tr in tbody.findall(f"{DB}tr"):
+        cells = tr.findall(f"{DB}td")
+        if len(cells) != 5:
+            fail(f"{UID_TABLE_ID}: row with {len(cells)} cells: {[cell_text(c) for c in cells]}")
+        total_rows += 1
+        uid_cell, name_cell, _keyword_cell, type_cell, _part_cell = (cell_text(c) for c in cells)
+        if clean_uid_field(type_cell) != "Transfer Syntax":
+            continue
+
+        uid = clean_uid_field(uid_cell)
+        if not CONCRETE_UID.match(uid):
+            fail(f"{UID_TABLE_ID}: Transfer Syntax row has an unparseable UID {uid_cell!r}")
+        name = clean_name(name_cell, join=False)
+        if ZERO_WIDTH_SPACE in name_cell:
+            fail(f"{UID_TABLE_ID}: Transfer Syntax row {uid!r} has U+200B in its name {name_cell!r} - " "this table has never needed JOINED_NAMES-style handling; decide by hand before adding it.")
+        if not name:
+            fail(f"{UID_TABLE_ID}: Transfer Syntax row {uid!r} has no name")
+        if uid in transfer_syntaxes:
+            fail(f"{UID_TABLE_ID}: duplicate Transfer Syntax UID {uid}")
+        transfer_syntaxes[uid] = {"name": name}
+
+    return {
+        "edition": edition,
+        "totalRows": total_rows,
+        "transferSyntaxes": {uid: transfer_syntaxes[uid] for uid in sorted(transfer_syntaxes)},
+    }
+
+
 def shape_of(mask: str) -> str:
     return re.sub(r"[0-9a-f]", "h", mask[:4]) + "," + re.sub(r"[0-9a-f]", "h", mask[4:])
 
@@ -211,10 +273,15 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="output path (default: src/model/dictionary.json)")
     parser.add_argument("--keywords-out", type=Path, default=DEFAULT_KEYWORDS_OUT, help="test-only keywords path (default: fixtures/dictionary-keywords.json)")
+    parser.add_argument(
+        "--transfer-syntaxes-out", type=Path, default=DEFAULT_TRANSFER_SYNTAXES_OUT, help="transfer syntax registry path (default: src/pixels/transfer-syntaxes.json)"
+    )
     parser.add_argument("--url", default=DEFAULT_URL, help="DocBook source URL")
     args = parser.parse_args(argv)
 
-    parsed = parse(fetch(args.url))
+    root = ET.fromstring(fetch(args.url))
+    parsed = parse(root)
+    ts_parsed = parse_transfer_syntaxes(root, parsed["edition"])
 
     if ANNEX_E_PATH.exists():
         annex_edition = json.loads(ANNEX_E_PATH.read_text(encoding="utf-8"))["source"]["edition"]
@@ -237,10 +304,21 @@ def main(argv: Optional[List[str]] = None) -> None:
         "byTag": parsed["keywordsByTag"],
         "byMask": parsed["keywordsByMask"],
     }
+    transfer_syntaxes_output = {
+        "source": {
+            "edition": ts_parsed["edition"],
+            "url": args.url,
+            "table": "PS3.6 Annex A, Table A-1 (rows where UID Type is \"Transfer Syntax\")",
+        },
+        "transferSyntaxes": ts_parsed["transferSyntaxes"],
+    }
+
     text = json.dumps(output, indent=2) + "\n"
     keywords_text = json.dumps(keywords, indent=2) + "\n"
+    transfer_syntaxes_text = json.dumps(transfer_syntaxes_output, indent=2) + "\n"
     shipped = len(json.dumps(output, separators=(",", ":")).encode("utf-8"))
-    for path, content in ((args.out, text), (args.keywords_out, keywords_text)):
+    ts_shipped = len(json.dumps(transfer_syntaxes_output, separators=(",", ":")).encode("utf-8"))
+    for path, content in ((args.out, text), (args.keywords_out, keywords_text), (args.transfer_syntaxes_out, transfer_syntaxes_text)):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content.encode("utf-8"))
 
@@ -273,6 +351,14 @@ def main(argv: Optional[List[str]] = None) -> None:
     print(f"wrote {args.keywords_out}: {len(keywords_text.encode('utf-8'))} bytes ({len(parsed['keywordsByTag'])} by tag, {len(parsed['keywordsByMask'])} by mask), test-only")
     if shipped > SHIPPED_LIMIT:
         print(f"WARNING: the shipped size exceeds {SHIPPED_LIMIT // 1024} KB; stop and report before going further.")
+
+    print(f"{UID_TABLE_ID}: {ts_parsed['totalRows']} total rows, {len(ts_parsed['transferSyntaxes'])} with UID Type 'Transfer Syntax'")
+    print(
+        f"wrote {args.transfer_syntaxes_out}: {len(transfer_syntaxes_text.encode('utf-8'))} bytes on disk "
+        f"(pretty-printed), {ts_shipped} bytes minified ({ts_shipped / 1024:.1f} KB shipped)"
+    )
+    if ts_shipped > UID_TRANSFER_SYNTAX_LIMIT:
+        print(f"WARNING: the shipped transfer syntax table exceeds {UID_TRANSFER_SYNTAX_LIMIT // 1024} KB; stop and report before going further.")
 
 
 if __name__ == "__main__":

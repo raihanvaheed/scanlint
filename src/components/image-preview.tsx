@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 import type { DecodedImage, WindowSetting } from "../pixels/decode";
-import type { DecodeOptions, DecodeOutcome } from "../pixels/protocol";
+import type { DecodeOptions, DecodeOutcome, DecodeReason } from "../pixels/protocol";
 import { FOCUS_RING } from "./focus";
 
 export type SteppingProps = {
@@ -42,6 +42,7 @@ const TRANSFER_SYNTAX_WORDS: Record<string, string> = {
   "1.2.840.10008.1.2": "uncompressed",
   "1.2.840.10008.1.2.1": "uncompressed",
   "1.2.840.10008.1.2.5": "RLE compressed",
+  "1.2.840.10008.1.2.4.50": "JPEG compressed",
 };
 
 function formatTransferSyntax(uid: string): string {
@@ -51,6 +52,20 @@ function formatTransferSyntax(uid: string): string {
 function formatWindow(window: WindowSetting): string {
   return `${Math.round(window.center)} / ${Math.round(window.width)}`;
 }
+
+// Not part of any one message (3.6): a reader who sees a bare failure where the preview should be
+// may reasonably conclude the whole analysis failed and distrust findings that are in fact complete
+// - the worse of the two errors, for a tool whose entire claim is about what it found in the
+// metadata. True wherever it appears, since the preview only ever renders after a successful parse -
+// so it is appended structurally, in this one place, rather than baked into each thrown message
+// (where it would drift the first time someone edited one). `no-pixel-data` gets the shorter line:
+// "only the preview is unavailable" implies something was withheld, and a DICOMDIR never had an
+// image to withhold.
+const APPENDED_SENTENCE: Record<DecodeReason, string> = {
+  "unsupported-syntax": "The findings above are complete — only the preview is unavailable.",
+  "unsupported-format": "The findings above are complete — only the preview is unavailable.",
+  "no-pixel-data": "The findings above are complete.",
+};
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -69,6 +84,7 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
   const [phase, setPhase] = useState<Phase>("idle");
   const [image, setImage] = useState<DecodedImage | null>(null);
   const [message, setMessage] = useState("");
+  const [reason, setReason] = useState<DecodeReason | undefined>(undefined);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const windowOverride = useRef<WindowSetting | null>(null);
   const dragStart = useRef<{ x: number; y: number; window: WindowSetting } | null>(null);
@@ -109,6 +125,7 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
       if (seq !== requestSeq.current) return;
       setPhase("error");
       setMessage(messageOf(e));
+      setReason(undefined);
       return;
     }
     const outcome = await decode(bytes, window ? { window } : undefined);
@@ -118,6 +135,7 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
       if ("superseded" in outcome && outcome.superseded) return; // section 7: nothing rendered
       setPhase("error");
       setMessage(outcome.message);
+      setReason("reason" in outcome ? outcome.reason : undefined);
       return;
     }
     setImage({ width: outcome.width, height: outcome.height, rgba: new Uint8ClampedArray(outcome.rgba), window: outcome.window, transferSyntaxUid: outcome.transferSyntaxUid });
@@ -190,7 +208,16 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
       {phase === "decoding" && image === null && <p className="mt-4 text-ink motion-safe:animate-pulse">Decoding…</p>}
 
       {phase === "error" && (
-        <p className="mt-4 break-words text-sm text-shade">{message}</p>
+        <>
+          {/* A reason-carrying outcome is a stated scope limitation, not a defect - the same
+              neutral, muted treatment as the burned-in caveat line (see single-file-result.tsx).
+              A plain failure (no reason) is a genuine defect in the file, and reads differently -
+              text-ink, not text-shade - so the two cannot be mistaken for each other. Before 3.6,
+              both rendered identically in text-shade; there was no distinct "error" styling to tell
+              them apart with. */}
+          <p className={`mt-4 break-words text-sm ${reason ? "text-shade" : "text-ink"}`}>{message}</p>
+          {reason && <p className="mt-1 break-words text-sm text-shade">{APPENDED_SENTENCE[reason]}</p>}
+        </>
       )}
 
       {image !== null && (
@@ -201,7 +228,11 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
             height={image.height}
             tabIndex={0}
             role="img"
-            aria-label={`Decoded image of ${fileLabel}. This is medical pixel data and cannot otherwise be described. When focused, arrow keys adjust brightness and contrast; hold shift for larger steps.`}
+            aria-label={
+              image.window
+                ? `Decoded image of ${fileLabel}. This is medical pixel data and cannot otherwise be described. When focused, arrow keys adjust brightness and contrast; hold shift for larger steps.`
+                : `Decoded image of ${fileLabel}. This is medical pixel data and cannot otherwise be described.`
+            }
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -214,10 +245,12 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
             {`${image.width} × ${image.height} · ${formatTransferSyntax(image.transferSyntaxUid)}`}
             {image.window && ` · window ${formatWindow(image.window)}`}
           </p>
-          {image.window && (
+          {image.window ? (
             <button type="button" onClick={onReset} className={`mt-2 cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-ink hover:border-signal ${FOCUS_RING}`}>
               Reset window
             </button>
+          ) : (
+            <p className="mt-2 text-sm text-shade">no window to adjust — these pixels are shown as stored</p>
           )}
         </div>
       )}

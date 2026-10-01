@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { decodeImage } from "../pixels/decode";
+import { buildDicom, bytes8 } from "../pixels/build-dicom";
 import type { DecodeOptions, DecodeOutcome } from "../pixels/protocol";
 import { ImagePreview, drawDecoded } from "./image-preview";
 
@@ -35,12 +36,12 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 
 // A real decodeImage call, wrapped in the same shape createPixelClient's decode() resolves with -
 // close enough to real behaviour for these tests without needing a worker.
-function realDecode(bytes: ArrayBuffer, options?: DecodeOptions): Promise<DecodeOutcome> {
+async function realDecode(bytes: ArrayBuffer, options?: DecodeOptions): Promise<DecodeOutcome> {
   try {
-    const image = decodeImage(new Uint8Array(bytes), options);
-    return Promise.resolve({ ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid });
+    const image = await decodeImage(new Uint8Array(bytes), options);
+    return { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid };
   } catch (e) {
-    return Promise.resolve({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -96,8 +97,8 @@ describe("closed by default", () => {
 });
 
 describe("drawing (drawDecoded)", () => {
-  it("putImageData receives data of the right dimensions", () => {
-    const image = decodeImage(readFixture("pattern-explicit.dcm"));
+  it("putImageData receives data of the right dimensions", async () => {
+    const image = await decodeImage(readFixture("pattern-explicit.dcm"));
     const ctx = { putImageData: vi.fn() } as unknown as CanvasRenderingContext2D;
     drawDecoded(ctx, image);
 
@@ -111,8 +112,8 @@ describe("drawing (drawDecoded)", () => {
     expect(y).toBe(0);
   });
 
-  it("a handful of pixel values match what decodeImage produces for the same fixture, under the declared window", () => {
-    const image = decodeImage(readFixture("pattern-explicit.dcm"), { window: { center: 0, width: 400 } });
+  it("a handful of pixel values match what decodeImage produces for the same fixture, under the declared window", async () => {
+    const image = await decodeImage(readFixture("pattern-explicit.dcm"), { window: { center: 0, width: 400 } });
     const ctx = { putImageData: vi.fn() } as unknown as CanvasRenderingContext2D;
     drawDecoded(ctx, image);
 
@@ -240,7 +241,7 @@ describe("superseding", () => {
     await user.keyboard("{ArrowRight}"); // issues the older, still-pending request
     await user.keyboard("{ArrowRight}"); // issues the newer request
 
-    const image = decodeImage(readFixture("pattern-mono1.dcm"));
+    const image = await decodeImage(readFixture("pattern-mono1.dcm"));
     const newerOutcome: DecodeOutcome = { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid };
     newer.resolve(newerOutcome);
     await waitFor(() => expect(screen.getByRole("img").getAttribute("width")).toBe(String(image.width)));
@@ -266,14 +267,112 @@ describe("failures", () => {
     expect(screen.queryByRole("img")).toBeNull();
   });
 
-  it("a file with no pixel data reads as a statement, using decodeImage's own wording", async () => {
+  it("a file with no pixel data reads as a statement, using decodeImage's own wording, with the no-pixel-data appended sentence", async () => {
     const user = userEvent.setup();
     const getBytes = () => Promise.resolve(toArrayBuffer(readBurnedIn().slice())); // placeholder bytes
-    const decode = () => Promise.resolve<DecodeOutcome>({ ok: false, message: "No pixel data (7FE0,0010) in this file" });
+    const decode = () => Promise.resolve<DecodeOutcome>({ ok: false, reason: "no-pixel-data", message: "No pixel data (7FE0,0010) in this file" });
     render(<ImagePreview fileKey="report.dcm" fileLabel="report.dcm" getBytes={getBytes} decode={decode} announce={NO_ANNOUNCE} />);
 
     await user.click(screen.getByRole("button", { name: "Show image" }));
     expect(await screen.findByText("No pixel data (7FE0,0010) in this file")).toBeTruthy();
+    expect(await screen.findByText("The findings above are complete.")).toBeTruthy();
+    // The shorter line, not the "only the preview is unavailable" one - 3.4's wording distinction.
+    expect(screen.queryByText(/only the preview is unavailable/)).toBeNull();
+  });
+
+  it("an unsupported-syntax outcome carries the longer appended sentence", async () => {
+    const user = userEvent.setup();
+    const getBytes = () => Promise.resolve(new ArrayBuffer(0));
+    const decode = () => Promise.resolve<DecodeOutcome>({ ok: false, reason: "unsupported-syntax", transferSyntaxUid: "1.2.840.10008.1.2.4.90", message: "This image is stored as JPEG 2000 Image Compression (Lossless Only) (1.2.840.10008.1.2.4.90). ScanLint shows uncompressed, RLE and JPEG baseline images." });
+    render(<ImagePreview fileKey="jp2.dcm" fileLabel="jp2.dcm" getBytes={getBytes} decode={decode} announce={NO_ANNOUNCE} />);
+
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+    expect(await screen.findByText(/JPEG 2000/)).toBeTruthy();
+    expect(await screen.findByText("The findings above are complete — only the preview is unavailable.")).toBeTruthy();
+  });
+
+  it("an unsupported-format outcome also carries the longer appended sentence", async () => {
+    const user = userEvent.setup();
+    const getBytes = () => Promise.resolve(new ArrayBuffer(0));
+    const decode = () => Promise.resolve<DecodeOutcome>({ ok: false, reason: "unsupported-format", message: "This image is stored as PALETTE COLOR, which ScanLint does not render. ScanLint renders greyscale and interleaved RGB images." });
+    render(<ImagePreview fileKey="pal.dcm" fileLabel="pal.dcm" getBytes={getBytes} decode={decode} announce={NO_ANNOUNCE} />);
+
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+    expect(await screen.findByText(/PALETTE COLOR/)).toBeTruthy();
+    expect(await screen.findByText("The findings above are complete — only the preview is unavailable.")).toBeTruthy();
+  });
+
+  it("a plain failure (no reason) carries no appended sentence", async () => {
+    const user = userEvent.setup();
+    const getBytes = () => Promise.resolve(new ArrayBuffer(0));
+    const decode = () => Promise.resolve<DecodeOutcome>({ ok: false, message: "bad file, could not be read" });
+    render(<ImagePreview fileKey="bad.dcm" fileLabel="bad.dcm" getBytes={getBytes} decode={decode} announce={NO_ANNOUNCE} />);
+
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+    expect(await screen.findByText("bad file, could not be read")).toBeTruthy();
+    expect(screen.queryByText(/findings above are complete/)).toBeNull();
+  });
+
+  // The whole point of typing `reason` (3.6): a scope limitation and a genuine defect must not look
+  // the same, or the type bought nothing.
+  it("a reason-carrying outcome and a plain failure render with different styling", async () => {
+    const user = userEvent.setup();
+    const getBytes = () => Promise.resolve(new ArrayBuffer(0));
+
+    const plainDecode = () => Promise.resolve<DecodeOutcome>({ ok: false, message: "a genuine defect" });
+    render(<ImagePreview fileKey="a.dcm" fileLabel="a.dcm" getBytes={getBytes} decode={plainDecode} announce={NO_ANNOUNCE} />);
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+    const plainMessage = await screen.findByText("a genuine defect");
+    cleanup();
+
+    const reasonDecode = () => Promise.resolve<DecodeOutcome>({ ok: false, reason: "unsupported-format", message: "a stated limitation" });
+    render(<ImagePreview fileKey="b.dcm" fileLabel="b.dcm" getBytes={getBytes} decode={reasonDecode} announce={NO_ANNOUNCE} />);
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+    const reasonMessage = await screen.findByText("a stated limitation");
+
+    expect(plainMessage.className).not.toBe(reasonMessage.className);
+  });
+});
+
+describe("windowless images (3.6)", () => {
+  function rgbBytes(): Uint8Array {
+    return buildDicom({
+      rows: 1,
+      columns: 2,
+      bitsAllocated: 8,
+      bitsStored: 8,
+      highBit: 7,
+      samplesPerPixel: 3,
+      photometricInterpretation: "RGB",
+      planarConfiguration: 0,
+      pixelData: bytes8([10, 20, 30, 40, 50, 60]),
+    });
+  }
+
+  it("hides the window segment of the caption, the Reset window button, and the arrow-key hint - and shows the 'no window' line instead", async () => {
+    const user = userEvent.setup();
+    const getBytes = () => Promise.resolve(toArrayBuffer(rgbBytes()));
+    render(<ImagePreview fileKey="rgb.dcm" fileLabel="rgb.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+    const img = await screen.findByRole("img");
+
+    expect(screen.getByText(/2 × 1 · uncompressed/).textContent).not.toMatch(/window/);
+    expect(screen.queryByRole("button", { name: "Reset window" })).toBeNull();
+    expect(screen.getByText("no window to adjust — these pixels are shown as stored")).toBeTruthy();
+    expect(img.getAttribute("aria-label")).not.toMatch(/arrow keys/);
+  });
+
+  it("a windowed image still shows all three: the window segment, Reset window, and the arrow-key hint", async () => {
+    const user = userEvent.setup();
+    const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("pattern-explicit.dcm")));
+    render(<ImagePreview fileKey="pattern-explicit.dcm" fileLabel="pattern-explicit.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+    const img = await screen.findByRole("img");
+
+    expect(windowText()).toMatch(/window -?\d/);
+    expect(screen.getByRole("button", { name: "Reset window" })).toBeTruthy();
+    expect(img.getAttribute("aria-label")).toMatch(/arrow keys/);
+    expect(screen.queryByText("no window to adjust — these pixels are shown as stored")).toBeNull();
   });
 });
 
@@ -326,7 +425,7 @@ describe("stepping between slices", () => {
     expect(screen.getByRole("img").getAttribute("width")).toBe(widthBefore);
     expect(screen.queryByText("Decoding…")).toBeNull();
 
-    const image = decodeImage(readFixture("pattern-mono1.dcm"));
+    const image = await decodeImage(readFixture("pattern-mono1.dcm"));
     secondDeferred.resolve({ ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid });
     await waitFor(() => expect(screen.getByText("Slice 2 of 2")).toBeTruthy());
   });
