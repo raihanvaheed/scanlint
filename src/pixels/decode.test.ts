@@ -11,14 +11,18 @@ const ROOT = path.resolve(__dirname, "..", "..");
 const FIXTURES_DIR = path.join(ROOT, "fixtures", "pixels");
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "fixtures", "pixels.manifest.json"), "utf8"));
 
-function readFixture(name: string): Uint8Array {
-  return new Uint8Array(fs.readFileSync(path.join(FIXTURES_DIR, name)));
-}
-
 function manifestEntry(name: string) {
   const entry = manifest.files.find((f: { file: string }) => f.file === name);
   if (!entry) throw new Error(`No manifest entry for ${name}`);
   return entry;
+}
+
+// burned-in.dcm ships as a second sample (3.4a), not a fixture - its manifest entry carries its own
+// "directory", which this honours rather than assuming every file lives in fixtures/pixels/.
+function readFixture(name: string): Uint8Array {
+  const entry = manifestEntry(name);
+  const dir = entry.directory ? path.join(ROOT, entry.directory) : FIXTURES_DIR;
+  return new Uint8Array(fs.readFileSync(path.join(dir, name)));
 }
 
 function sha256(bytes: Uint8Array): string {

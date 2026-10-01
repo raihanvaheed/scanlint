@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { LoadScreen } from "../components/load-screen";
-import { loadSample } from "../lib/load-sample";
+import { loadBurnedInSample, loadSample } from "../lib/load-sample";
 import { createPool, defaultPoolSize } from "../parse/pool";
 import type { Pool } from "../parse/pool";
 import { createPixelClient } from "../pixels/client";
@@ -37,5 +37,5 @@ export default function Home() {
   }, []);
 
   // createPool() below is never given a size, so this mirrors its own default exactly.
-  return <LoadScreen parse={parse} loadSample={loadSample} concurrency={defaultPoolSize()} decodePixels={decodePixels} />;
+  return <LoadScreen parse={parse} loadSample={loadSample} loadBurnedInSample={loadBurnedInSample} concurrency={defaultPoolSize()} decodePixels={decodePixels} />;
 }

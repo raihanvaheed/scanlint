@@ -26,6 +26,9 @@ import { SingleFileDetails, SingleFileHeader } from "./single-file-result";
 type LoadScreenProps = {
   parse: (bytes: ArrayBuffer) => Promise<ParseOutcome>;
   loadSample: () => Promise<ArrayBuffer>;
+  /** The second sample (3.4a): a scan whose metadata declares no burned-in text, and whose pixels
+   * say otherwise. Its own literal fetch, not a parameterised loadSample - see load-sample.ts. */
+  loadBurnedInSample: () => Promise<ArrayBuffer>;
   /** How many files may be read and parsed at once. Pass the pool's own worker count, so a
    * folder's files are never all read into memory ahead of the workers that will handle them. */
   concurrency: number;
@@ -77,12 +80,13 @@ function buildSeriesData(results: FileResult[], getBytesByName: BytesByName): Se
 }
 
 const SAMPLE_NAME = "single.dcm";
+const BURNED_IN_SAMPLE_NAME = "burned-in.dcm";
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function LoadScreen({ parse, loadSample, concurrency, decodePixels }: LoadScreenProps) {
+export function LoadScreen({ parse, loadSample, loadBurnedInSample, concurrency, decodePixels }: LoadScreenProps) {
   const [view, setView] = useState<View>({ kind: "idle" });
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -272,6 +276,13 @@ export function LoadScreen({ parse, loadSample, concurrency, decodePixels }: Loa
               className={`mt-8 cursor-pointer rounded-md border-2 border-transparent bg-signal px-[30px] py-2.5 text-lg font-semibold text-paper hover:brightness-110 ${FOCUS_RING}`}
             >
               Load sample
+            </button>
+            <button
+              type="button"
+              onClick={() => void analyse(BURNED_IN_SAMPLE_NAME, loadBurnedInSample, "The sample file could not be loaded.")}
+              className={`mt-3 cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-sm text-ink hover:border-signal ${FOCUS_RING}`}
+            >
+              Load a scan with text in the image
             </button>
           </div>
         )}

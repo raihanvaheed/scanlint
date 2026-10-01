@@ -74,11 +74,13 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
   const dragStart = useRef<{ x: number; y: number; window: WindowSetting } | null>(null);
   const requestSeq = useRef(0);
 
-  // A new slice: let it pick its own window rather than carrying over a drag from the last one.
-  // The old image stays exactly where it is (state untouched) until this one resolves.
+  // A new slice: carries the current window across (3.4a) - someone stepping through a series to
+  // find faint text would otherwise have to find it again on every slice, which defeats the reason
+  // they were stepping. `windowOverride` is left exactly as it is; `null` (never adjusted) still
+  // lets the new slice pick its own declared value or fallback, same as before. The old image stays
+  // exactly where it is (state untouched) until this one resolves.
   useEffect(() => {
-    windowOverride.current = null;
-    if (visible) void runDecode(null);
+    if (visible) void runDecode(windowOverride.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileKey]);
 

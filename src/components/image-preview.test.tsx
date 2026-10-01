@@ -12,9 +12,21 @@ afterEach(cleanup);
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const FIXTURES_DIR = path.join(ROOT, "fixtures", "pixels");
+const SAMPLES_DIR = path.join(ROOT, "public", "samples");
 
 function readFixture(name: string): Uint8Array {
   return new Uint8Array(fs.readFileSync(path.join(FIXTURES_DIR, name)));
+}
+
+// burned-in.dcm ships as a second sample (3.4a), not a fixture.
+function readBurnedIn(): Uint8Array {
+  return new Uint8Array(fs.readFileSync(path.join(SAMPLES_DIR, "burned-in.dcm")));
+}
+
+// Matches only the caption paragraph ("… · window 12 / 34"), not the "Reset window" button, which
+// also contains the word "window" but never followed by a number.
+function windowText(): string {
+  return screen.getByText(/window -?\d/).textContent ?? "";
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -115,17 +127,11 @@ describe("drawing (drawDecoded)", () => {
 describe("window adjustment", () => {
   async function openWithFallback() {
     const user = userEvent.setup();
-    const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("burned-in.dcm")));
+    const getBytes = () => Promise.resolve(toArrayBuffer(readBurnedIn()));
     render(<ImagePreview fileKey="burned-in.dcm" fileLabel="burned-in.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
     await user.click(screen.getByRole("button", { name: "Show image" }));
     const canvas = await screen.findByRole("img");
     return canvas;
-  }
-
-  // Matches only the caption paragraph ("… · window 12 / 34"), not the "Reset window" button,
-  // which also contains the word "window" but never followed by a number.
-  function windowText(): string {
-    return screen.getByText(/window -?\d/).textContent ?? "";
   }
 
   it("a horizontal drag of 256px roughly doubles the width", async () => {
@@ -202,7 +208,7 @@ describe("window adjustment", () => {
   });
 
   it("each adjustment issues a decode", async () => {
-    const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("burned-in.dcm")));
+    const getBytes = () => Promise.resolve(toArrayBuffer(readBurnedIn()));
     const decode = vi.fn(realDecode);
     const user = userEvent.setup();
     render(<ImagePreview fileKey="burned-in.dcm" fileLabel="burned-in.dcm" getBytes={getBytes} decode={decode} announce={NO_ANNOUNCE} />);
@@ -219,7 +225,7 @@ describe("window adjustment", () => {
 describe("superseding", () => {
   it("two adjustments in flight: the older resolves superseded, nothing renders for it", async () => {
     const user = userEvent.setup();
-    const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("burned-in.dcm")));
+    const getBytes = () => Promise.resolve(toArrayBuffer(readBurnedIn()));
     const older = deferred<DecodeOutcome>();
     const newer = deferred<DecodeOutcome>();
     // Call 1: the initial open, resolved for real so the canvas (and its keyboard handler) exists.
@@ -262,7 +268,7 @@ describe("failures", () => {
 
   it("a file with no pixel data reads as a statement, using decodeImage's own wording", async () => {
     const user = userEvent.setup();
-    const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("burned-in.dcm").slice())); // placeholder bytes
+    const getBytes = () => Promise.resolve(toArrayBuffer(readBurnedIn().slice())); // placeholder bytes
     const decode = () => Promise.resolve<DecodeOutcome>({ ok: false, message: "No pixel data (7FE0,0010) in this file" });
     render(<ImagePreview fileKey="report.dcm" fileLabel="report.dcm" getBytes={getBytes} decode={decode} announce={NO_ANNOUNCE} />);
 
@@ -323,5 +329,56 @@ describe("stepping between slices", () => {
     const image = decodeImage(readFixture("pattern-mono1.dcm"));
     secondDeferred.resolve({ ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid });
     await waitFor(() => expect(screen.getByText("Slice 2 of 2")).toBeTruthy());
+  });
+
+  // 3.4a: someone stepping through a series to find faint text would otherwise have to find the
+  // window again on every slice. pattern-explicit.dcm (declared 0/400) and burned-in.dcm (no
+  // declared window, so its own fallback is a very different ~2150/3891) make an adjustment and a
+  // reset observably different, which a same-window pair of fixtures could not.
+  it("carries an adjusted window across a step, and Reset returns to the new slice's own value", async () => {
+    const user = userEvent.setup();
+    const getBytes = vi
+      .fn()
+      .mockResolvedValueOnce(toArrayBuffer(readFixture("pattern-explicit.dcm"))) // the initial open
+      .mockResolvedValueOnce(toArrayBuffer(readFixture("pattern-explicit.dcm"))) // the arrow-key adjustment re-reads it
+      .mockResolvedValueOnce(toArrayBuffer(readBurnedIn())) // stepping to the next slice
+      .mockResolvedValueOnce(toArrayBuffer(readBurnedIn())); // Reset re-reads the (current) file fresh
+
+    const { rerender } = render(
+      <ImagePreview
+        fileKey="pattern-explicit.dcm"
+        fileLabel="pattern-explicit.dcm"
+        getBytes={getBytes}
+        decode={realDecode}
+        announce={NO_ANNOUNCE}
+        stepping={{ label: "Slice 1 of 2", hasPrevious: false, hasNext: true, onPrevious: () => {}, onNext: () => {} }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Show image" }));
+    const canvas = await screen.findByRole("img");
+    expect(windowText()).toContain("window 0 / 400");
+
+    canvas.focus();
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() => expect(windowText()).toContain("window 0 / 406"));
+
+    // Step to the next slice: the adjusted window (0 / 406) must survive, not reset to burned-in's
+    // own fallback (~2150 / 3891).
+    rerender(
+      <ImagePreview
+        fileKey="burned-in.dcm"
+        fileLabel="burned-in.dcm"
+        getBytes={getBytes}
+        decode={realDecode}
+        announce={NO_ANNOUNCE}
+        stepping={{ label: "Slice 2 of 2", hasPrevious: true, hasNext: false, onPrevious: () => {}, onNext: () => {} }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Slice 2 of 2")).toBeTruthy());
+    expect(windowText()).toContain("window 0 / 406");
+
+    // Reset returns to this (new) slice's own value, not pattern-explicit's and not the carried one.
+    await user.click(screen.getByRole("button", { name: "Reset window" }));
+    await waitFor(() => expect(windowText()).toContain("window 2150 / 3891"));
   });
 });
