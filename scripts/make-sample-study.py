@@ -1977,6 +1977,12 @@ def jpeg_fragment_manifest_entry(
         "blockFormula": block_formula,
         "jpegFragmentSha256": hashlib.sha256(jpeg_fragment).hexdigest(),
         "jpegFragmentLength": len(jpeg_fragment),
+        # PS3.5 Annex A.4: an odd-length fragment is padded to even inside its encapsulation item
+        # with one 0x00 byte after EOI. A decoder (including the browser's own, in 3.6) is handed
+        # this item's bytes verbatim, so it is the one of these two lengths it actually has to cope
+        # with trailing-byte-after-EOI on.
+        "jpegFragmentEncapsulatedLength": len(fragments[0]),
+        "jpegFragmentPadded": len(jpeg_fragment) % 2 == 1,
         "pixelDataSha256": hashlib.sha256(pixel_data).hexdigest(),
         "fragmentCount": len(fragments),
         "hasBasicOffsetTable": has_bot,
@@ -2009,14 +2015,22 @@ def build_jpeg_pixels(root: Path) -> None:
         markers["entropy"][:3] == bytes.fromhex("fd03f9") and format(markers["entropy"][3], "08b")[:6] == "111110",
     )
 
-    def coord_entries_grayscale(blocks: np.ndarray) -> List[dict]:
+    def coord_entries_grayscale(blocks: np.ndarray, *, invert: bool = False) -> List[dict]:
         coords = [(0, 0), (7, 0), (8, 0), (63, 0), (0, 63), (63, 63), (32, 32), (31, 32)]
         return [
-            {"x": x, "y": y, "blockX": x // JPEG_BLOCK_SIZE, "blockY": y // JPEG_BLOCK_SIZE, "value": int(blocks[y // JPEG_BLOCK_SIZE, x // JPEG_BLOCK_SIZE])}
+            {
+                "x": x, "y": y, "blockX": x // JPEG_BLOCK_SIZE, "blockY": y // JPEG_BLOCK_SIZE,
+                "value": (255 - int(blocks[y // JPEG_BLOCK_SIZE, x // JPEG_BLOCK_SIZE])) if invert else int(blocks[y // JPEG_BLOCK_SIZE, x // JPEG_BLOCK_SIZE]),
+            }
             for x, y in coords
         ]
 
     pattern_coords = coord_entries_grayscale(pattern_blocks)
+    # decodeImage() applies MONOCHROME1's 255-y inversion identically for JPEG and uncompressed
+    # data (src/pixels/decode.ts's `invert` flag doesn't branch on transfer syntax), so this matches
+    # pattern-mono1.dcm's own convention (3.1/3.2): expectedOutput here is what decodeImage returns,
+    # not the raw JPEG sample - the same meaning that key has on every other entry in this manifest.
+    pattern_coords_mono1 = coord_entries_grayscale(pattern_blocks, invert=True)
     pattern_formula = "value(bx, by) = (160 if (bx + by) % 2 == 0 else 96) + 2 * by, for bx, by each in [0, 8)"
 
     datasets: Dict[str, Dataset] = {}
@@ -2155,12 +2169,14 @@ def build_jpeg_pixels(root: Path) -> None:
                 file_name="pattern-jpeg-mono1.dcm", rows=pattern_rows, columns=pattern_cols, samples_per_pixel=1,
                 planar_configuration=None, photometric="MONOCHROME1", block_formula=pattern_formula,
                 jpeg_fragment=pattern_jpeg_bytes, stuff_count=pattern_stuff,
-                pixel_data=datasets["pattern-jpeg-mono1.dcm"].PixelData, coords=pattern_coords, tolerance=0,
+                pixel_data=datasets["pattern-jpeg-mono1.dcm"].PixelData, coords=pattern_coords_mono1, tolerance=0,
             ),
-            "note": "expectedOutput here is the raw JPEG-decoded sample value, identical to "
-                    "pattern-jpeg.dcm's because the JPEG bytes are identical - a decoder does not know "
-                    "or care about PhotometricInterpretation. Whether and how a viewer inverts a "
-                    "MONOCHROME1 image with no declared window is 3.6's question, not answered here.",
+            "note": "The JPEG bytes are byte-identical to pattern-jpeg.dcm's - only "
+                    "PhotometricInterpretation differs - but expectedOutput is 255 minus "
+                    "pattern-jpeg.dcm's value at each coordinate, not the raw JPEG-decoded sample. "
+                    "Every entry in this manifest uses expectedOutput to mean 'what decodeImage() "
+                    "returns', matching pattern-mono1.dcm's own convention (see patternFormula / 3.1 "
+                    "and 3.2): MONOCHROME1's 255-y inversion is applied after decode, not deferred.",
         },
         jpeg_fragment_manifest_entry(
             file_name="pattern-jpeg-rgb.dcm", rows=pattern_rows, columns=pattern_cols, samples_per_pixel=3,

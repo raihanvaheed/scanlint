@@ -733,6 +733,8 @@
       "blockFormula": "value(bx, by) = (160 if (bx + by) % 2 == 0 else 96) + 2 * by, for bx, by each in [0, 8)",
       "jpegFragmentSha256": "4fbebe6da3e44cdc4ae52b972039db3b653f09811e1cec2a5ac36ec9c6b2e678",
       "jpegFragmentLength": 285,
+      "jpegFragmentEncapsulatedLength": 286,
+      "jpegFragmentPadded": true,
       "pixelDataSha256": "91b5b225d102624c482c524b1b6314171e44d07eb05dd4e87cbaa25ddd2a4a5a",
       "fragmentCount": 1,
       "hasBasicOffsetTable": true,
@@ -814,6 +816,8 @@
       "blockFormula": "value(bx, by) = (160 if (bx + by) % 2 == 0 else 96) + 2 * by, for bx, by each in [0, 8)",
       "jpegFragmentSha256": "4fbebe6da3e44cdc4ae52b972039db3b653f09811e1cec2a5ac36ec9c6b2e678",
       "jpegFragmentLength": 285,
+      "jpegFragmentEncapsulatedLength": 286,
+      "jpegFragmentPadded": true,
       "pixelDataSha256": "91b5b225d102624c482c524b1b6314171e44d07eb05dd4e87cbaa25ddd2a4a5a",
       "fragmentCount": 1,
       "hasBasicOffsetTable": true,
@@ -824,60 +828,60 @@
           "y": 0,
           "blockX": 0,
           "blockY": 0,
-          "value": 160
+          "value": 95
         },
         {
           "x": 7,
           "y": 0,
           "blockX": 0,
           "blockY": 0,
-          "value": 160
+          "value": 95
         },
         {
           "x": 8,
           "y": 0,
           "blockX": 1,
           "blockY": 0,
-          "value": 96
+          "value": 159
         },
         {
           "x": 63,
           "y": 0,
           "blockX": 7,
           "blockY": 0,
-          "value": 96
+          "value": 159
         },
         {
           "x": 0,
           "y": 63,
           "blockX": 0,
           "blockY": 7,
-          "value": 110
+          "value": 145
         },
         {
           "x": 63,
           "y": 63,
           "blockX": 7,
           "blockY": 7,
-          "value": 174
+          "value": 81
         },
         {
           "x": 32,
           "y": 32,
           "blockX": 4,
           "blockY": 4,
-          "value": 168
+          "value": 87
         },
         {
           "x": 31,
           "y": 32,
           "blockX": 3,
           "blockY": 4,
-          "value": 104
+          "value": 151
         }
       ],
       "tolerance": 0,
-      "note": "expectedOutput here is the raw JPEG-decoded sample value, identical to pattern-jpeg.dcm's because the JPEG bytes are identical - a decoder does not know or care about PhotometricInterpretation. Whether and how a viewer inverts a MONOCHROME1 image with no declared window is 3.6's question, not answered here."
+      "note": "The JPEG bytes are byte-identical to pattern-jpeg.dcm's - only PhotometricInterpretation differs - but expectedOutput is 255 minus pattern-jpeg.dcm's value at each coordinate, not the raw JPEG-decoded sample. Every entry in this manifest uses expectedOutput to mean 'what decodeImage() returns', matching pattern-mono1.dcm's own convention (see patternFormula / 3.1 and 3.2): MONOCHROME1's 255-y inversion is applied after decode, not deferred."
     },
     {
       "file": "pattern-jpeg-rgb.dcm",
@@ -896,6 +900,8 @@
       "blockFormula": "R(bx, by) = 32 + 28 * bx; G(bx, by) = 32 + 28 * by; B(bx, by) = 160 if (bx + by) % 2 == 0 else 64, for bx, by each in [0, 8)",
       "jpegFragmentSha256": "48785c41cd8ee8070688ce78bafc11696567402331e60ad6584342754644540f",
       "jpegFragmentLength": 449,
+      "jpegFragmentEncapsulatedLength": 450,
+      "jpegFragmentPadded": true,
       "pixelDataSha256": "482775afd1efa7b92c696e17b8db6681860d5022be3f94e9786ac09b71c74a31",
       "fragmentCount": 1,
       "hasBasicOffsetTable": true,
@@ -1049,6 +1055,8 @@
       "blockFormula": "block rows 0-23: make_phantom, sampled at each block's centre, scaled to 0-200; block rows 24-31: 64, except TESTPATIENT at 255 in block rows 25-29 starting at block column 3",
       "jpegFragmentSha256": "f30f210e5c2c550ee29a94bf2d2ed44898b93adf55b898718db646ec5b0e24ce",
       "jpegFragmentLength": 1312,
+      "jpegFragmentEncapsulatedLength": 1312,
+      "jpegFragmentPadded": false,
       "pixelDataSha256": "24f598397d9373adda89a63cc9d2fb30a00f04808c3febd24548bf85970b4889",
       "fragmentCount": 1,
       "hasBasicOffsetTable": true,
