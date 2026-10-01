@@ -171,6 +171,22 @@ describe("project invariants", () => {
     });
   });
 
+  describe("JPEG decoding goes through a Blob, never an object URL or an <img> element", () => {
+    // 3.6: decodeJpegFragment uses createImageBitmap(blob) + OffscreenCanvas. An object URL is both
+    // unnecessary for that path and a handle that leaks if nothing ever revokes it; an <img> element
+    // or `new Image()` would mean reaching for the DOM from a module a worker also runs in.
+    const FORBIDDEN_JPEG_TERMS = ["createObjectURL", "<img", "new Image("];
+
+    it("src/pixels contains none of createObjectURL, <img, or new Image(", () => {
+      for (const file of listSourceFiles(path.join(ROOT, "src/pixels"))) {
+        const content = fs.readFileSync(file, "utf8");
+        for (const term of FORBIDDEN_JPEG_TERMS) {
+          expect(content.includes(term), `${path.relative(ROOT, file)} contains "${term}"`).toBe(false);
+        }
+      }
+    });
+  });
+
   describe("the one network exception", () => {
     const allowlisted = NETWORK_ALLOWLIST.map((file) => ({
       file,

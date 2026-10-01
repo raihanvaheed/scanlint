@@ -48,12 +48,12 @@ const NO_ANNOUNCE = () => {};
 // needing a worker, so the drill-down's image preview can be exercised for real in these tests too.
 const fixtureGetBytesByName = new Map(fixtureFiles.map((f) => [f.fileName, () => Promise.resolve(new Uint8Array(fs.readFileSync(path.join(DIR, f.fileName))).buffer as ArrayBuffer)]));
 
-function decodePixels(bytes: ArrayBuffer, options?: DecodeOptions): Promise<DecodeOutcome> {
+async function decodePixels(bytes: ArrayBuffer, options?: DecodeOptions): Promise<DecodeOutcome> {
   try {
-    const image = decodeImage(new Uint8Array(bytes), options);
-    return Promise.resolve({ ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid });
+    const image = await decodeImage(new Uint8Array(bytes), options);
+    return { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid };
   } catch (e) {
-    return Promise.resolve({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }
 }
 

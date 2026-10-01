@@ -123,7 +123,9 @@ describe("superseding", () => {
     const later = client.decode(buffer());
     workers[0].reply({ id: idOf(workers[0], 1), ...image([1, 1, 1, 1]) });
     await later;
-    expect(await superseded).toHaveProperty("superseded", true);
+    const supersededOutcome = await superseded;
+    expect(supersededOutcome).toHaveProperty("superseded", true);
+    expect(supersededOutcome).not.toHaveProperty("reason"); // 3.6: superseded stays its own boolean, not folded into reason
 
     const failing = client.decode(buffer());
     workers[0].reply({ id: idOf(workers[0], 2), ok: false, message: "bad file" });
