@@ -20,9 +20,11 @@ export type DecodeReason = "unsupported-syntax" | "unsupported-format" | "no-pix
 // rgba travels as a plain ArrayBuffer, transferred rather than an ImageBitmap - the main thread
 // reconstructs it with `new Uint8ClampedArray(buffer)` and `new ImageData(array, width, height)`.
 // `window` is absent for a colour image, or a JPEG one, neither of which is windowed at all - see
-// DecodedImage.
+// DecodedImage. `frame`/`numberOfFrames` (3.8) are always present, mirroring DecodedImage - the UI
+// needs the total to decide whether a frame segment/stepping controls render at all, and the actual
+// decoded index to render "Frame X of Y" without tracking it separately from what was last requested.
 export type DecodeResult =
-  | { id: number; ok: true; width: number; height: number; rgba: ArrayBuffer; window?: WindowSetting; transferSyntaxUid: string }
+  | { id: number; ok: true; width: number; height: number; rgba: ArrayBuffer; window?: WindowSetting; transferSyntaxUid: string; frame: number; numberOfFrames: number }
   | { id: number; ok: false; reason: "unsupported-syntax"; transferSyntaxUid: string; message: string }
   | { id: number; ok: false; reason: "unsupported-format" | "no-pixel-data"; message: string }
   | { id: number; ok: false; message: string };
@@ -38,7 +40,7 @@ export type DecodeResult =
  * interact.
  */
 export type DecodeOutcome =
-  | { ok: true; width: number; height: number; rgba: ArrayBuffer; window?: WindowSetting; transferSyntaxUid: string }
+  | { ok: true; width: number; height: number; rgba: ArrayBuffer; window?: WindowSetting; transferSyntaxUid: string; frame: number; numberOfFrames: number }
   | { ok: false; superseded: true; message: string }
   | { ok: false; reason: "unsupported-syntax"; transferSyntaxUid: string; message: string }
   | { ok: false; reason: "unsupported-format" | "no-pixel-data"; message: string }

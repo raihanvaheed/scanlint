@@ -39,7 +39,7 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 async function realDecode(bytes: ArrayBuffer, options?: DecodeOptions): Promise<DecodeOutcome> {
   try {
     const image = await decodeImage(new Uint8Array(bytes), options);
-    return { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid };
+    return { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid, frame: image.frame, numberOfFrames: image.numberOfFrames };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }
@@ -242,7 +242,7 @@ describe("superseding", () => {
     await user.keyboard("{ArrowRight}"); // issues the newer request
 
     const image = await decodeImage(readFixture("pattern-mono1.dcm"));
-    const newerOutcome: DecodeOutcome = { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid };
+    const newerOutcome: DecodeOutcome = { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid, frame: image.frame, numberOfFrames: image.numberOfFrames };
     newer.resolve(newerOutcome);
     await waitFor(() => expect(screen.getByRole("img").getAttribute("width")).toBe(String(image.width)));
 
@@ -426,7 +426,7 @@ describe("stepping between slices", () => {
     expect(screen.queryByText("Decoding…")).toBeNull();
 
     const image = await decodeImage(readFixture("pattern-mono1.dcm"));
-    secondDeferred.resolve({ ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid });
+    secondDeferred.resolve({ ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid, frame: image.frame, numberOfFrames: image.numberOfFrames });
     await waitFor(() => expect(screen.getByText("Slice 2 of 2")).toBeTruthy());
   });
 
@@ -479,5 +479,348 @@ describe("stepping between slices", () => {
     // Reset returns to this (new) slice's own value, not pattern-explicit's and not the carried one.
     await user.click(screen.getByRole("button", { name: "Reset window" }));
     await waitFor(() => expect(windowText()).toContain("window 2150 / 3891"));
+  });
+});
+
+// 3.8: frames. multiframe-burned-in.dcm is native (real decode, real window, real distinguishable
+// frames) and is used for almost everything below; multiframe-jpeg.dcm (no window, by design) covers
+// the one thing it cannot: a multi-frame file with no window segment at all.
+describe("frames (3.8)", () => {
+  function stubJpegDecoder() {
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 64, height: 64, close: vi.fn() })),
+    );
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        constructor(
+          public width: number,
+          public height: number,
+        ) {}
+        getContext() {
+          return { drawImage: vi.fn(), getImageData: () => ({ data: new Uint8ClampedArray(this.width * this.height * 4) }) };
+        }
+      },
+    );
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Anchored and case-sensitive so it matches only the stepping counter's own span ("Frame 3 of 3"),
+  // not the caption's lowercase "· frame 3 of 3" segment - both contain the same digits.
+  function frameText(): string {
+    return screen.getByText(/^Frame \d+ of \d+$/).textContent ?? "";
+  }
+
+  // windowText() returns the whole caption, which also carries the frame number - comparing two
+  // whole captions to check "the window didn't change" would fail the moment the frame does. This
+  // pulls out just the window segment.
+  function windowOnly(): string {
+    return windowText().match(/window -?\d+ \/ -?\d+/)?.[0] ?? "";
+  }
+
+  describe("the caption", () => {
+    it("a multi-frame file shows the frame segment, between the dimensions and the transfer syntax", async () => {
+      const user = userEvent.setup();
+      const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("multiframe-burned-in.dcm")));
+      render(<ImagePreview fileKey="multiframe-burned-in.dcm" fileLabel="multiframe-burned-in.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+
+      const caption = screen.getByText(/128 × 128/).textContent ?? "";
+      const dimIdx = caption.indexOf("128 × 128");
+      const frameIdx = caption.indexOf("frame 1 of 3");
+      const syntaxIdx = caption.indexOf("uncompressed");
+      expect(dimIdx).toBeGreaterThanOrEqual(0);
+      expect(frameIdx).toBeGreaterThan(dimIdx);
+      expect(syntaxIdx).toBeGreaterThan(frameIdx);
+    });
+
+    it("a single-frame file shows no frame segment", async () => {
+      const user = userEvent.setup();
+      const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("pattern-explicit.dcm")));
+      render(<ImagePreview fileKey="pattern-explicit.dcm" fileLabel="pattern-explicit.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+
+      expect(screen.queryByText(/frame \d+ of \d+/i)).toBeNull();
+    });
+
+    it("a multi-frame file with no window shows no window segment and still shows the frame segment", async () => {
+      stubJpegDecoder();
+      const user = userEvent.setup();
+      const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("multiframe-jpeg.dcm")));
+      render(<ImagePreview fileKey="multiframe-jpeg.dcm" fileLabel="multiframe-jpeg.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+
+      expect(screen.getByText(/frame 1 of 3/)).toBeTruthy();
+      expect(screen.queryByText(/· window/)).toBeNull(); // the "no window to adjust" line below also says "window"
+      expect(screen.getByText("no window to adjust — these pixels are shown as stored")).toBeTruthy();
+    });
+  });
+
+  describe("stepping", () => {
+    async function openMultiframeBurnedIn(decode = realDecode) {
+      const user = userEvent.setup();
+      const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("multiframe-burned-in.dcm")));
+      render(<ImagePreview fileKey="multiframe-burned-in.dcm" fileLabel="multiframe-burned-in.dcm" getBytes={getBytes} decode={decode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      const canvas = await screen.findByRole("img");
+      return { user, canvas };
+    }
+
+    it("the counter reads correctly, disables at each end, and neither wraps", async () => {
+      const { user } = await openMultiframeBurnedIn();
+      expect(frameText()).toBe("Frame 1 of 3");
+      expect(screen.getByRole("button", { name: "Previous frame" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("button", { name: "Next frame" })).toHaveProperty("disabled", false);
+
+      await user.click(screen.getByRole("button", { name: "Next frame" }));
+      await waitFor(() => expect(frameText()).toBe("Frame 2 of 3"));
+      await user.click(screen.getByRole("button", { name: "Next frame" }));
+      await waitFor(() => expect(frameText()).toBe("Frame 3 of 3"));
+      expect(screen.getByRole("button", { name: "Next frame" })).toHaveProperty("disabled", true);
+
+      // Clicking a disabled button is a no-op, not a wrap to frame 1.
+      await user.click(screen.getByRole("button", { name: "Next frame" }));
+      expect(frameText()).toBe("Frame 3 of 3");
+
+      await user.click(screen.getByRole("button", { name: "Previous frame" }));
+      await waitFor(() => expect(frameText()).toBe("Frame 2 of 3"));
+    });
+
+    it("each step issues exactly one decode, with the right frame", async () => {
+      const decode = vi.fn(realDecode);
+      const { user } = await openMultiframeBurnedIn(decode);
+      const before = decode.mock.calls.length;
+
+      await user.click(screen.getByRole("button", { name: "Next frame" }));
+      await waitFor(() => expect(frameText()).toBe("Frame 2 of 3"));
+      expect(decode.mock.calls.length).toBe(before + 1);
+      expect(decode.mock.calls.at(-1)?.[1]).toMatchObject({ frame: 1 });
+    });
+
+    it("the previous frame stays on the canvas while the next decodes", async () => {
+      const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("multiframe-burned-in.dcm")));
+      const user = userEvent.setup();
+      const next = deferred<DecodeOutcome>();
+      const decode = vi.fn().mockImplementationOnce(realDecode).mockReturnValueOnce(next.promise);
+      render(<ImagePreview fileKey="multiframe-burned-in.dcm" fileLabel="multiframe-burned-in.dcm" getBytes={getBytes} decode={decode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+
+      await user.click(screen.getByRole("button", { name: "Next frame" }));
+      expect(frameText()).toBe("Frame 1 of 3"); // still decoding frame 2 - the old frame's own label stays
+      expect(screen.queryByText("Decoding…")).toBeNull(); // 3.4's own rule: no spinner while an image is already in hand
+
+      const image = await decodeImage(readFixture("multiframe-burned-in.dcm"), { frame: 1 });
+      next.resolve({ ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid, frame: image.frame, numberOfFrames: image.numberOfFrames });
+      await waitFor(() => expect(frameText()).toBe("Frame 2 of 3"));
+    });
+
+    it("PageDown, PageUp, Home and End move frames and do not adjust the window", async () => {
+      const { user, canvas } = await openMultiframeBurnedIn();
+      const windowBefore = windowOnly();
+      canvas.focus();
+
+      await user.keyboard("{PageDown}");
+      await waitFor(() => expect(frameText()).toBe("Frame 2 of 3"));
+      expect(windowOnly()).toBe(windowBefore);
+
+      await user.keyboard("{End}");
+      await waitFor(() => expect(frameText()).toBe("Frame 3 of 3"));
+      expect(windowOnly()).toBe(windowBefore);
+
+      await user.keyboard("{PageUp}");
+      await waitFor(() => expect(frameText()).toBe("Frame 2 of 3"));
+
+      await user.keyboard("{Home}");
+      await waitFor(() => expect(frameText()).toBe("Frame 1 of 3"));
+      expect(windowOnly()).toBe(windowBefore);
+    });
+
+    it("the arrow keys still adjust the window and do not move frames", async () => {
+      const { user, canvas } = await openMultiframeBurnedIn();
+      canvas.focus();
+
+      await user.keyboard("{ArrowRight}");
+      await waitFor(() => expect(windowText()).not.toBe("window 2150 / 3891"));
+      expect(frameText()).toBe("Frame 1 of 3");
+    });
+  });
+
+  describe("both axes", () => {
+    const STEPPING = { label: "Slice 1 of 2", hasPrevious: false, hasNext: true, onPrevious: () => {}, onNext: () => {} };
+
+    it("a multi-frame file reached from a series renders both control pairs", async () => {
+      const user = userEvent.setup();
+      const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("multiframe-burned-in.dcm")));
+      render(<ImagePreview fileKey="multiframe-burned-in.dcm" fileLabel="multiframe-burned-in.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} stepping={STEPPING} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+
+      expect(screen.getByRole("button", { name: "Previous frame" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Next frame" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Previous slice" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Next slice" })).toBeTruthy();
+      expect(screen.getByText("Frame 1 of 3")).toBeTruthy();
+      expect(screen.getByText("Slice 1 of 2")).toBeTruthy();
+    });
+
+    it("a single-frame file in a series renders only the slice pair", async () => {
+      const user = userEvent.setup();
+      const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("pattern-explicit.dcm")));
+      render(<ImagePreview fileKey="pattern-explicit.dcm" fileLabel="pattern-explicit.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} stepping={STEPPING} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+
+      expect(screen.queryByRole("button", { name: "Previous frame" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Next frame" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Previous slice" })).toBeTruthy();
+    });
+
+    it("a standalone multi-frame file (no stepping prop) renders only the frame pair", async () => {
+      const user = userEvent.setup();
+      const getBytes = () => Promise.resolve(toArrayBuffer(readFixture("multiframe-burned-in.dcm")));
+      render(<ImagePreview fileKey="multiframe-burned-in.dcm" fileLabel="multiframe-burned-in.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+
+      expect(screen.getByRole("button", { name: "Next frame" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Next slice" })).toBeNull();
+    });
+
+  });
+
+  // 3.8a: the step 3.8 shipped clamped the *displayed* frame for a shorter file correctly, but also
+  // overwrote the *requested* one with the clamped value - so the original request was gone for
+  // good the moment a reader passed through one shorter file, including a single-frame file with no
+  // control on screen to even show the clamp happened. These tests cover the fix: requestedFrame is
+  // written only by the frame controls themselves (always from what's displayed, never from the old
+  // request), and the slice-step effect only ever reads it.
+  describe("what a slice step remembers about the requested frame (3.8a)", () => {
+    function multiFrameBytes(frames: number[]): Uint8Array {
+      return buildDicom({
+        rows: 1,
+        columns: 1,
+        bitsAllocated: 8,
+        bitsStored: 8,
+        highBit: 7,
+        samplesPerPixel: 1,
+        photometricInterpretation: "MONOCHROME2",
+        numberOfFrames: frames.length,
+        windowCenter: 128,
+        windowWidth: 256,
+        pixelData: bytes8(frames),
+      });
+    }
+
+    function singleFrameBytes(value: number): Uint8Array {
+      return buildDicom({
+        rows: 1,
+        columns: 1,
+        bitsAllocated: 8,
+        bitsStored: 8,
+        highBit: 7,
+        samplesPerPixel: 1,
+        photometricInterpretation: "MONOCHROME2",
+        windowCenter: 128,
+        windowWidth: 256,
+        pixelData: bytes8([value]),
+      });
+    }
+
+    it("a shorter file in between clamps the display but not the request - the next long-enough file restores it", async () => {
+      const user = userEvent.setup();
+      const fileA = multiFrameBytes([0, 1, 2, 3, 4]); // 5 frames
+      const fileB = multiFrameBytes([10, 20]); // 2 frames
+      const getBytes = vi
+        .fn()
+        .mockResolvedValueOnce(toArrayBuffer(fileA)) // open: frame 1 of 5
+        .mockResolvedValueOnce(toArrayBuffer(fileA)) // Next frame x3 -> frame 4 of 5
+        .mockResolvedValueOnce(toArrayBuffer(fileA))
+        .mockResolvedValueOnce(toArrayBuffer(fileA))
+        .mockResolvedValueOnce(toArrayBuffer(fileB)) // step to B: learn its count (2)
+        .mockResolvedValueOnce(toArrayBuffer(fileB)) // corrective decode, clamped to frame 2 of 2
+        .mockResolvedValueOnce(toArrayBuffer(fileA)) // step back to A: learn its count (5)
+        .mockResolvedValueOnce(toArrayBuffer(fileA)); // corrective decode, restored to frame 4 of 5
+
+      const { rerender } = render(<ImagePreview fileKey="a.dcm" fileLabel="a.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+      for (let i = 0; i < 3; i++) {
+        await user.click(screen.getByRole("button", { name: "Next frame" }));
+        await waitFor(() => expect(frameText()).toBe(`Frame ${i + 2} of 5`));
+      }
+      expect(frameText()).toBe("Frame 4 of 5"); // requested = 3 (0-indexed)
+
+      rerender(<ImagePreview fileKey="b.dcm" fileLabel="b.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await waitFor(() => expect(frameText()).toBe("Frame 2 of 2")); // clamped display; request still 3
+
+      rerender(<ImagePreview fileKey="a.dcm" fileLabel="a.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await waitFor(() => expect(frameText()).toBe("Frame 4 of 5")); // restored, not stuck at 2
+    });
+
+    it("using a frame control while clamped collapses the request to the display - a later file does not restore the old one", async () => {
+      const user = userEvent.setup();
+      const fileA = multiFrameBytes([0, 1, 2, 3, 4]); // 5 frames
+      const fileB = multiFrameBytes([10, 20]); // 2 frames
+      const getBytes = vi
+        .fn()
+        .mockResolvedValueOnce(toArrayBuffer(fileA)) // open: frame 1 of 5
+        .mockResolvedValueOnce(toArrayBuffer(fileA)) // Next frame x3 -> frame 4 of 5
+        .mockResolvedValueOnce(toArrayBuffer(fileA))
+        .mockResolvedValueOnce(toArrayBuffer(fileA))
+        .mockResolvedValueOnce(toArrayBuffer(fileB)) // step to B: learn its count (2)
+        .mockResolvedValueOnce(toArrayBuffer(fileB)) // corrective decode, clamped to frame 2 of 2
+        .mockResolvedValueOnce(toArrayBuffer(fileB)) // Previous frame on B -> frame 1 of 2, request now 0
+        .mockResolvedValueOnce(toArrayBuffer(fileA)); // step back to A: request is 0, single direct decode
+
+      const { rerender } = render(<ImagePreview fileKey="a.dcm" fileLabel="a.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+      for (let i = 0; i < 3; i++) {
+        await user.click(screen.getByRole("button", { name: "Next frame" }));
+      }
+      await waitFor(() => expect(frameText()).toBe("Frame 4 of 5"));
+
+      rerender(<ImagePreview fileKey="b.dcm" fileLabel="b.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await waitFor(() => expect(frameText()).toBe("Frame 2 of 2"));
+
+      await user.click(screen.getByRole("button", { name: "Previous frame" }));
+      await waitFor(() => expect(frameText()).toBe("Frame 1 of 2")); // the reader's own choice: request is now 0
+
+      rerender(<ImagePreview fileKey="a.dcm" fileLabel="a.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await waitFor(() => expect(frameText()).toBe("Frame 1 of 5")); // not restored to 4 - the control reset the request
+    });
+
+    it("a single-frame slice in between - with no frame control on screen to show the clamp - still does not erase the request", async () => {
+      const user = userEvent.setup();
+      const fileA = multiFrameBytes([0, 1, 2]); // 3 frames
+      const single = singleFrameBytes(99);
+      const getBytes = vi
+        .fn()
+        .mockResolvedValueOnce(toArrayBuffer(fileA)) // open: frame 1 of 3
+        .mockResolvedValueOnce(toArrayBuffer(fileA)) // Next frame x2 -> frame 3 of 3
+        .mockResolvedValueOnce(toArrayBuffer(fileA))
+        .mockResolvedValueOnce(toArrayBuffer(single)) // step to the single-frame file: clamps to 0, no corrective decode needed
+        .mockResolvedValueOnce(toArrayBuffer(fileA)) // step back to A: learn its count (3)
+        .mockResolvedValueOnce(toArrayBuffer(fileA)); // corrective decode, restored to frame 3 of 3
+
+      const { rerender } = render(<ImagePreview fileKey="a.dcm" fileLabel="a.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await user.click(screen.getByRole("button", { name: "Show image" }));
+      await screen.findByRole("img");
+      await user.click(screen.getByRole("button", { name: "Next frame" }));
+      await user.click(screen.getByRole("button", { name: "Next frame" }));
+      await waitFor(() => expect(frameText()).toBe("Frame 3 of 3"));
+
+      rerender(<ImagePreview fileKey="single.dcm" fileLabel="single.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await waitFor(() => expect(screen.queryByText(/^Frame \d+ of \d+$/)).toBeNull()); // no control at all
+      expect(screen.queryByText(/frame \d+ of \d+/)).toBeNull(); // no caption segment either
+
+      rerender(<ImagePreview fileKey="a.dcm" fileLabel="a.dcm" getBytes={getBytes} decode={realDecode} announce={NO_ANNOUNCE} />);
+      await waitFor(() => expect(frameText()).toBe("Frame 3 of 3")); // restored, even though nothing showed the clamp
+    });
   });
 });

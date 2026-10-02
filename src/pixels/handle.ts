@@ -13,8 +13,8 @@ const FALLBACK_MESSAGE = "Could not read this file's pixel data.";
 // ever crosses the worker/main-thread message boundary, never one of these instances itself.
 export async function handleDecode(bytes: Uint8Array, options?: DecodeOptions): Promise<DecodeOutcome> {
   try {
-    const { width, height, rgba, window, transferSyntaxUid } = await decodeImage(bytes, options);
-    return { ok: true, width, height, rgba: rgba.buffer as ArrayBuffer, window, transferSyntaxUid };
+    const { width, height, rgba, window, transferSyntaxUid, frame, numberOfFrames } = await decodeImage(bytes, options);
+    return { ok: true, width, height, rgba: rgba.buffer as ArrayBuffer, window, transferSyntaxUid, frame, numberOfFrames };
   } catch (e) {
     if (e instanceof UnsupportedSyntaxError) {
       return { ok: false, reason: "unsupported-syntax", transferSyntaxUid: e.transferSyntaxUid, message: e.message };

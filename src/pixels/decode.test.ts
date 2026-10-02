@@ -4,7 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { parseDicom } from "dicom-parser";
 import { decodeImage } from "./decode";
-import { UnsupportedSyntaxError } from "./errors";
+import { UnsupportedFormatError, UnsupportedSyntaxError } from "./errors";
 import { extractFrameBytes } from "./pixel-data";
 import {
   PART10_PREAMBLE,
@@ -584,5 +584,93 @@ describe("decodeImage: 3.6 transfer syntax dispatch", () => {
     expect(message).not.toMatch(/pixel data/i);
     expect(message).not.toMatch(/BitsAllocated/);
     expect(message).not.toMatch(/PlanarConfiguration/);
+  });
+});
+
+// 3.8: multiframe-burned-in.dcm is native, so every check here runs for real in Node - unlike
+// multiframe-jpeg.dcm, whose per-frame pixel *values* need a real browser's JPEG decoder (section 11
+// of 3.8's own report) and are not re-asserted here; what Node can and does check for it is
+// dispatch - that three distinct frames resolve, with the right frame/numberOfFrames echoed back.
+describe("decodeImage: 3.8 multi-frame fixtures", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("multiframe-burned-in.dcm: every frame decodes under the one declared window, matching the manifest exactly", async () => {
+    const entry = manifestEntry("multiframe-burned-in.dcm");
+    const bytes = readFixture("multiframe-burned-in.dcm");
+    expect(entry.numberOfFrames).toBe(3);
+
+    for (let frame = 0; frame < entry.numberOfFrames; frame++) {
+      const { width, rgba, window, numberOfFrames } = await decodeImage(bytes, { frame });
+      expect(window).toEqual({ center: entry.windowCenter, width: entry.windowWidth });
+      expect(numberOfFrames).toBe(3);
+      for (const point of entry.expectedOutputByFrame[frame]) {
+        const i = (point.y * width + point.x) * 4;
+        expect([rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]], `frame ${frame} (${point.x},${point.y})`).toEqual([point.grey, point.grey, point.grey, 255]);
+      }
+    }
+  });
+
+  it("multiframe-burned-in.dcm: frame 3's text differs from its surroundings by at least 64 of 255; frames 1 and 2 have no pixel at the maximum", async () => {
+    const entry = manifestEntry("multiframe-burned-in.dcm");
+    const bytes = readFixture("multiframe-burned-in.dcm");
+    const box = entry.burnedInAnnotation.boundingBox;
+
+    const meanInsideOutside = (rgba: Uint8ClampedArray, width: number, height: number) => {
+      let insideSum = 0;
+      let insideCount = 0;
+      let outsideSum = 0;
+      let outsideCount = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const grey = rgba[(y * width + x) * 4];
+          if (y >= box.rowStart && y < box.rowEnd && x >= box.colStart && x < box.colEnd) {
+            insideSum += grey;
+            insideCount++;
+          } else {
+            outsideSum += grey;
+            outsideCount++;
+          }
+        }
+      }
+      return Math.abs(insideSum / insideCount - outsideSum / outsideCount);
+    };
+
+    const frame3 = await decodeImage(bytes, { frame: entry.burnedInAnnotation.textFrame - 1 });
+    expect(meanInsideOutside(frame3.rgba, frame3.width, frame3.height)).toBeGreaterThanOrEqual(64);
+
+    for (const frame of [0, 1]) {
+      const { rgba } = await decodeImage(bytes, { frame });
+      expect(Array.from(rgba).some((v, i) => i % 4 === 0 && v === 255)).toBe(false);
+    }
+  });
+
+  it("multiframe-jpeg.dcm: three distinct frames dispatch correctly, echoing frame/numberOfFrames back (pixel values need a browser - see the report)", async () => {
+    const entry = manifestEntry("multiframe-jpeg.dcm");
+    const bytes = readFixture("multiframe-jpeg.dcm");
+    expect(entry.numberOfFrames).toBe(3);
+    stubJpegDecoder(64, 64);
+
+    for (let frame = 0; frame < 3; frame++) {
+      const image = await decodeImage(bytes, { frame });
+      expect(image.frame).toBe(frame);
+      expect(image.numberOfFrames).toBe(3);
+      expect(image.window).toBeUndefined();
+    }
+  });
+
+  it("a frame index out of range still fails as a plain failure, with no reason, for a multi-frame file", async () => {
+    const bytes = readFixture("multiframe-burned-in.dcm");
+    let caught: unknown;
+    try {
+      await decodeImage(bytes, { frame: 3 });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught).not.toBeInstanceOf(UnsupportedFormatError);
+    const message = caught instanceof Error ? caught.message : String(caught);
+    expect(message).toMatch(/frame/i);
   });
 });

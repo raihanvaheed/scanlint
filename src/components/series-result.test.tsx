@@ -51,7 +51,7 @@ const fixtureGetBytesByName = new Map(fixtureFiles.map((f) => [f.fileName, () =>
 async function decodePixels(bytes: ArrayBuffer, options?: DecodeOptions): Promise<DecodeOutcome> {
   try {
     const image = await decodeImage(new Uint8Array(bytes), options);
-    return { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid };
+    return { ok: true, width: image.width, height: image.height, rgba: image.rgba.buffer as ArrayBuffer, window: image.window, transferSyntaxUid: image.transferSyntaxUid, frame: image.frame, numberOfFrames: image.numberOfFrames };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }
