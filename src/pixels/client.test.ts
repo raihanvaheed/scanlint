@@ -51,7 +51,7 @@ function setup() {
 const buffer = (length = 8): ArrayBuffer => new Uint8Array(length).fill(7).buffer;
 const idOf = (worker: FakeWorker, index = 0): number => worker.received[index].id;
 
-const image = (rgba: number[]) => ({ ok: true as const, width: 1, height: 1, rgba: new Uint8Array(rgba).buffer, transferSyntaxUid: "1.2.840.10008.1.2.1" });
+const image = (rgba: number[]) => ({ ok: true as const, width: 1, height: 1, rgba: new Uint8Array(rgba).buffer, transferSyntaxUid: "1.2.840.10008.1.2.1", frame: 0, numberOfFrames: 1 });
 
 describe("a single request", () => {
   it("resolves with the worker's image, without the id", async () => {

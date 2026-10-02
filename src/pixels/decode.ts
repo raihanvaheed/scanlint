@@ -10,8 +10,10 @@ import transferSyntaxRegistry from "./transfer-syntaxes.json";
 // for colour images, which are not windowed at all, and for JPEG, which 3.6 established carries no
 // rescale or window either (an 8-bit lossy modality has already mapped the data). `transferSyntaxUid`
 // is the raw UID; turning it into words ("uncompressed", "RLE compressed") is presentation, and
-// lives in the UI layer.
-export type DecodedImage = { width: number; height: number; rgba: Uint8ClampedArray; window?: WindowSetting; transferSyntaxUid: string };
+// lives in the UI layer. `frame` and `numberOfFrames` (3.8) are the zero-based frame actually decoded
+// and the file's own declared total - always present, `numberOfFrames` is 1 for a file that declares
+// none, so the caller never has to special-case "absent" versus "one".
+export type DecodedImage = { width: number; height: number; rgba: Uint8ClampedArray; window?: WindowSetting; transferSyntaxUid: string; frame: number; numberOfFrames: number };
 export type WindowSetting = { center: number; width: number };
 
 export const NO_PIXEL_DATA_MESSAGE = "No pixel data (7FE0,0010) in this file";
@@ -65,7 +67,7 @@ function readWord(bytes: Uint8Array, byteOffset: number, bytesPerSample: number)
   throw new Error(`BitsAllocated ${bytesPerSample * 8} is neither 8 nor 16`);
 }
 
-function passthroughRgb(frameBytes: Uint8Array, rows: number, columns: number, transferSyntaxUid: string): DecodedImage {
+function passthroughRgb(frameBytes: Uint8Array, rows: number, columns: number, transferSyntaxUid: string, frame: number, numberOfFrames: number): DecodedImage {
   const pixelCount = rows * columns;
   const rgba = new Uint8ClampedArray(pixelCount * 4);
   for (let i = 0; i < pixelCount; i++) {
@@ -74,7 +76,7 @@ function passthroughRgb(frameBytes: Uint8Array, rows: number, columns: number, t
     rgba[i * 4 + 2] = frameBytes[i * 3 + 2];
     rgba[i * 4 + 3] = 255;
   }
-  return { width: columns, height: rows, rgba, transferSyntaxUid };
+  return { width: columns, height: rows, rgba, transferSyntaxUid, frame, numberOfFrames };
 }
 
 function decodeGrayscale(
@@ -90,6 +92,8 @@ function decodeGrayscale(
   photometricInterpretation: string,
   window: WindowSetting | undefined,
   transferSyntaxUid: string,
+  frame: number,
+  numberOfFrames: number,
 ): DecodedImage {
   const pixelCount = rows * columns;
   const shift = highBit + 1 - bitsStored;
@@ -143,7 +147,7 @@ function decodeGrayscale(
     rgba[o + 3] = 255;
   }
 
-  return { width: columns, height: rows, rgba, window: { center, width }, transferSyntaxUid };
+  return { width: columns, height: rows, rgba, window: { center, width }, transferSyntaxUid, frame, numberOfFrames };
 }
 
 const JPEG_PHOTOMETRIC_FORMS = new Set(["MONOCHROME1", "MONOCHROME2", "YBR_FULL", "YBR_FULL_422", "RGB"]);
@@ -191,7 +195,7 @@ async function decodeJpegImage(
   // No rescale, no window: 3.6's own decision, same reasoning as uncompressed RGB in 3.2 - this is
   // 8-bit lossy data a modality has already mapped, and a `window` passed in by the caller is
   // ignored by never being read here.
-  return { width: columns, height: rows, rgba, transferSyntaxUid };
+  return { width: columns, height: rows, rgba, transferSyntaxUid, frame, numberOfFrames };
 }
 
 /**
@@ -304,7 +308,7 @@ export async function decodeImage(bytes: Uint8Array, options: { frame?: number; 
 
   if (samplesPerPixel === 3 && photometricInterpretation === "RGB") {
     const frameBytes = extractFrameBytes(dataSet, pixelDataElement, frame, pixelCount, samplesPerPixel, bytesPerSample, numberOfFrames);
-    return passthroughRgb(frameBytes, rows, columns, transferSyntaxUid);
+    return passthroughRgb(frameBytes, rows, columns, transferSyntaxUid, frame, numberOfFrames);
   }
 
   if (samplesPerPixel !== 1 || (photometricInterpretation !== "MONOCHROME1" && photometricInterpretation !== "MONOCHROME2")) {
@@ -318,5 +322,5 @@ export async function decodeImage(bytes: Uint8Array, options: { frame?: number; 
   const window = options.window ?? (declaredCenter !== undefined && declaredWidth !== undefined ? { center: declaredCenter, width: declaredWidth } : undefined);
 
   const frameBytes = extractFrameBytes(dataSet, pixelDataElement, frame, pixelCount, samplesPerPixel, bytesPerSample, numberOfFrames);
-  return decodeGrayscale(frameBytes, rows, columns, bytesPerSample, bitsStored, highBit, pixelRepresentation, rescaleSlope, rescaleIntercept, photometricInterpretation, window, transferSyntaxUid);
+  return decodeGrayscale(frameBytes, rows, columns, bytesPerSample, bitsStored, highBit, pixelRepresentation, rescaleSlope, rescaleIntercept, photometricInterpretation, window, transferSyntaxUid, frame, numberOfFrames);
 }

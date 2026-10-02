@@ -1852,7 +1852,7 @@ def build_jpeg_dataset(
     samples_per_pixel: int,
     photometric: str,
     patient_name: str,
-    jpeg_fragment: bytes,
+    jpeg_fragments: List[bytes],
 ) -> Dataset:
     ds = Dataset()
     meta = FileMetaDataset()
@@ -1892,7 +1892,13 @@ def build_jpeg_dataset(
     # No RescaleSlope/Intercept/WindowCenter/WindowWidth, deliberately (section 5): this is 8-bit
     # lossy data a modality has already mapped, and these files carry no window at all.
 
-    frag = DataElement(Tag(0x7FE00010), "OB", encapsulate([jpeg_fragment]))
+    # 3.8: NumberOfFrames is set only when there is more than one - every 3.5/3.6 fixture passes a
+    # single-element list here, and must regenerate byte for byte unchanged, which an always-present
+    # NumberOfFrames=1 tag would break.
+    if len(jpeg_fragments) > 1:
+        ds.NumberOfFrames = len(jpeg_fragments)
+
+    frag = DataElement(Tag(0x7FE00010), "OB", encapsulate(jpeg_fragments))
     frag.is_undefined_length = True
     ds[0x7FE00010] = frag
 
@@ -2037,14 +2043,14 @@ def build_jpeg_pixels(root: Path) -> None:
     datasets["pattern-jpeg.dcm"] = build_jpeg_dataset(
         sop_uid=JPEG_PATTERN_SOP_UID, study_uid=JPEG_PATTERN_STUDY_UID, series_uid=JPEG_PATTERN_SERIES_UID,
         rows=pattern_rows, columns=pattern_cols, samples_per_pixel=1, photometric="MONOCHROME2",
-        patient_name="SCANLINT^PIXELTEST", jpeg_fragment=pattern_jpeg_bytes,
+        patient_name="SCANLINT^PIXELTEST", jpeg_fragments=[pattern_jpeg_bytes],
     )
 
     # --- pattern-jpeg-mono1.dcm: the same JPEG bytes, only PhotometricInterpretation differs ---
     datasets["pattern-jpeg-mono1.dcm"] = build_jpeg_dataset(
         sop_uid=JPEG_PATTERN_SOP_UID, study_uid=JPEG_PATTERN_STUDY_UID, series_uid=JPEG_PATTERN_SERIES_UID,
         rows=pattern_rows, columns=pattern_cols, samples_per_pixel=1, photometric="MONOCHROME1",
-        patient_name="SCANLINT^PIXELTEST", jpeg_fragment=pattern_jpeg_bytes,
+        patient_name="SCANLINT^PIXELTEST", jpeg_fragments=[pattern_jpeg_bytes],
     )
 
     # --- pattern-jpeg-rgb.dcm ---
@@ -2069,7 +2075,7 @@ def build_jpeg_pixels(root: Path) -> None:
     datasets["pattern-jpeg-rgb.dcm"] = build_jpeg_dataset(
         sop_uid=JPEG_RGB_SOP_UID, study_uid=JPEG_RGB_STUDY_UID, series_uid=JPEG_RGB_SERIES_UID,
         rows=pattern_rows, columns=pattern_cols, samples_per_pixel=3, photometric="YBR_FULL",
-        patient_name="SCANLINT^PIXELTEST", jpeg_fragment=rgb_jpeg_bytes,
+        patient_name="SCANLINT^PIXELTEST", jpeg_fragments=[rgb_jpeg_bytes],
     )
 
     # --- burned-in-jpeg.dcm ---
@@ -2093,7 +2099,7 @@ def build_jpeg_pixels(root: Path) -> None:
     datasets["burned-in-jpeg.dcm"] = build_jpeg_dataset(
         sop_uid=BURNED_IN_JPEG_SOP_UID, study_uid=BURNED_IN_JPEG_STUDY_UID, series_uid=BURNED_IN_JPEG_SERIES_UID,
         rows=BURNED_IN_JPEG_ROWS, columns=BURNED_IN_JPEG_COLUMNS, samples_per_pixel=1, photometric="MONOCHROME2",
-        patient_name="TESTPATIENT^SCANLINT", jpeg_fragment=burned_jpeg_bytes,
+        patient_name="TESTPATIENT^SCANLINT", jpeg_fragments=[burned_jpeg_bytes],
     )
     datasets["burned-in-jpeg.dcm"].BurnedInAnnotation = "NO"
 
@@ -2238,6 +2244,308 @@ def build_jpeg_pixels(root: Path) -> None:
     print(f"wrote {manifest_path} ({manifest_path.stat().st_size} bytes, sha256 {_sha(manifest_path)})")
 
 
+# --- 3.8: two multi-frame fixtures. 3.2 already selects native frames by offset and 3.6 already
+# resolves encapsulated frames through the offset table; what was missing was fixtures that exercise
+# either path in a browser, and a way for a person to reach frame 2. This step adds no decoding
+# capability - both fixtures below are read entirely by code that already existed before it.
+
+MULTIFRAME_BURNED_IN_SIZE = 128
+MULTIFRAME_BURNED_IN_FRAMES = 3
+MULTIFRAME_BURNED_IN_RADIUS_1 = 40  # frames 1 and 3 - also burned-in.dcm's own radius at this size
+MULTIFRAME_BURNED_IN_RADIUS_2 = 44  # frame 2 - just enough wider that a step visibly changes something
+
+MULTIFRAME_JPEG_SIZE = 64
+MULTIFRAME_JPEG_FRAMES = 3
+
+MULTIFRAME_BURNED_IN_STUDY_UID = "2.25.529150262212918118100"  # sqrt(28)
+MULTIFRAME_BURNED_IN_SERIES_UID = "2.25.538516480713450403125"  # sqrt(29)
+MULTIFRAME_BURNED_IN_SOP_UID = "2.25.547722557505166113456"  # sqrt(30)
+MULTIFRAME_JPEG_STUDY_UID = "2.25.556776436283002192211"  # sqrt(31)
+MULTIFRAME_JPEG_SERIES_UID = "2.25.565685424949238019520"  # sqrt(32)
+MULTIFRAME_JPEG_SOP_UID = "2.25.574456264653802865985"  # sqrt(33)
+
+# The same eight coordinates read from every frame, so a reader can see the per-frame offset
+# directly rather than having to trust three separate tables. Chosen (not reused from
+# PIXEL_TEST_COORDS, which was tuned for a 64x64 canvas) to cover: two background corners that never
+# change; the disc's own centre, which happens to also carry frame 3's text (3001/3001/4095 stored -
+# both the radius-independent interior and the text overlay, in one coordinate); a point in the
+# radius-40-to-44 annulus, where frames 1 and 2 genuinely disagree and frame 3 (built from frame 1)
+# matches frame 1, not frame 2; a lit text pixel, present only in frame 3; and an unlit pixel inside
+# the text's own bounding box, to prove the box is not simply painted solid.
+MULTIFRAME_BURNED_IN_COORDS: List[Tuple[int, int]] = [
+    (0, 0), (127, 127), (64, 64), (64, 20), (20, 58), (36, 58), (0, 127), (127, 0),
+]
+
+
+def multiframe_burned_in_frames() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    frame1 = make_phantom(rows=MULTIFRAME_BURNED_IN_SIZE, columns=MULTIFRAME_BURNED_IN_SIZE, radius=MULTIFRAME_BURNED_IN_RADIUS_1)
+    frame2 = make_phantom(rows=MULTIFRAME_BURNED_IN_SIZE, columns=MULTIFRAME_BURNED_IN_SIZE, radius=MULTIFRAME_BURNED_IN_RADIUS_2)
+    frame3 = frame1.copy()
+    row0, col0, row1, col1 = burned_in_bounding_box()  # BURNED_IN_SIZE is also 128 - the same box applies
+    for i, ch in enumerate(BURNED_IN_TEXT):
+        for gy, row in enumerate(GLYPHS[ch]):
+            for gx, bit in enumerate(row):
+                if bit == "1":
+                    frame3[row0 + gy, col0 + i * GLYPH_WIDTH + gx] = BURNED_IN_MAX
+    return frame1, frame2, frame3
+
+
+def build_multiframe_native_dataset(
+    *,
+    sop_uid: str,
+    study_uid: str,
+    series_uid: str,
+    rows: int,
+    columns: int,
+    photometric: str,
+    frames: List[np.ndarray],
+    window_center: float,
+    window_width: float,
+    patient_name: str,
+) -> Dataset:
+    ds = Dataset()
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = SECONDARY_CAPTURE_STORAGE
+    meta.MediaStorageSOPInstanceUID = sop_uid
+    meta.TransferSyntaxUID = EXPLICIT_VR_LITTLE_ENDIAN
+    meta.ImplementationClassUID = IMPLEMENTATION_CLASS_UID
+    ds.file_meta = meta
+    ds.preamble = b"\x00" * 128
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+
+    ds.SOPClassUID = SECONDARY_CAPTURE_STORAGE
+    ds.SOPInstanceUID = sop_uid
+    ds.StudyInstanceUID = study_uid
+    ds.SeriesInstanceUID = series_uid
+    ds.SeriesNumber = "1"
+    ds.InstanceNumber = "1"
+    ds.Modality = "OT"
+    ds.PatientID = PIXELS_PATIENT_ID
+    ds.PatientName = patient_name
+
+    ds.Rows = rows
+    ds.Columns = columns
+    ds.BitsAllocated = PATTERN_BITS_ALLOCATED
+    ds.BitsStored = PATTERN_BITS_STORED
+    ds.HighBit = PATTERN_HIGH_BIT
+    ds.PixelRepresentation = 0
+    ds.PhotometricInterpretation = photometric
+    ds.SamplesPerPixel = 1
+    ds.NumberOfFrames = len(frames)
+
+    # No RescaleSlope/Intercept, matching burned-in.dcm's own precedent: these are raw stored values,
+    # not a ramp needing rescale. WindowCenter/WindowWidth ARE declared, and declared once for every
+    # frame - 3.7 found that a flat per-frame value with no window renders every frame as solid white
+    # regardless of its value, and the general case is the same: without a shared window, stepping
+    # would change the window as well as the image, and a reader could not tell which of the two moved.
+    ds.WindowCenter = str(window_center)
+    ds.WindowWidth = str(window_width)
+
+    pixel_bytes = b"".join(frame.astype("<u2").tobytes() for frame in frames)
+    ds.add(DataElement(Tag(0x7FE00010), "OW", pixel_bytes))
+
+    return ds
+
+
+def multiframe_burned_in_coord_entries(frames: Tuple[np.ndarray, np.ndarray, np.ndarray], center: float, width: float) -> List[List[dict]]:
+    # Not windowed_grey(): that helper hard-codes this script's RESCALE_SLOPE/RESCALE_INTERCEPT
+    # (2 and -1024), tuned for the pattern-*.dcm fixtures, which declare exactly those values. This
+    # fixture declares no RescaleSlope/RescaleIntercept at all (burned-in.dcm's own precedent), so
+    # decodeImage uses the PS3.3 defaults of slope 1 / intercept 0 - the stored value unchanged -
+    # and the oracle here has to match that, not silently inherit a rescale that isn't declared.
+    by_frame = []
+    for frame in frames:
+        entries = []
+        for x, y in MULTIFRAME_BURNED_IN_COORDS:
+            stored = int(frame[y, x])
+            grey = apply_window(stored, center, width)
+            entries.append({"x": x, "y": y, "stored": stored, "grey": grey})
+        by_frame.append(entries)
+    return by_frame
+
+
+def multiframe_jpeg_block_grid(f: int) -> np.ndarray:
+    """Section 3's formula: pattern-jpeg's own checkerboard, offset by 30 per frame. f=0 reproduces
+    pattern_jpeg_block_grid() exactly."""
+    by, bx = np.mgrid[0:JPEG_PATTERN_GRID, 0:JPEG_PATTERN_GRID]
+    base = np.where((bx + by) % 2 == 0, 160, 96)
+    return (base + 2 * by + 30 * f).astype(int)
+
+
+def multiframe_jpeg_coord_entries() -> List[List[dict]]:
+    coords = [(0, 0), (7, 0), (8, 0), (63, 0), (0, 63), (63, 63), (32, 32), (31, 32)]
+    by_frame = []
+    for f in range(MULTIFRAME_JPEG_FRAMES):
+        grid = multiframe_jpeg_block_grid(f)
+        entries = [
+            {"x": x, "y": y, "blockX": x // JPEG_BLOCK_SIZE, "blockY": y // JPEG_BLOCK_SIZE, "value": int(grid[y // JPEG_BLOCK_SIZE, x // JPEG_BLOCK_SIZE])} for x, y in coords
+        ]
+        by_frame.append(entries)
+    return by_frame
+
+
+def build_multiframe_pixels(root: Path) -> None:
+    directory = root / PIXELS_DIR_REL
+    manifest_path = root / PIXELS_MANIFEST_REL
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    def ok(message: str, condition: bool) -> None:
+        if not condition:
+            raise SystemExit(f"multiframe pixel check FAILED: {message}")
+        print(f"  ok  {message}")
+
+    print("multiframe checks:")
+
+    # --- multiframe-burned-in.dcm ---
+    frame1, frame2, frame3 = multiframe_burned_in_frames()
+    all_frames = np.stack([frame1, frame2, frame3])
+    window_lo, window_hi = float(all_frames.min()), float(all_frames.max())
+    window_center = (window_lo + window_hi) / 2
+    window_width = window_hi - window_lo
+
+    burned_ds = build_multiframe_native_dataset(
+        sop_uid=MULTIFRAME_BURNED_IN_SOP_UID, study_uid=MULTIFRAME_BURNED_IN_STUDY_UID, series_uid=MULTIFRAME_BURNED_IN_SERIES_UID,
+        rows=MULTIFRAME_BURNED_IN_SIZE, columns=MULTIFRAME_BURNED_IN_SIZE, photometric="MONOCHROME2",
+        frames=[frame1, frame2, frame3], window_center=window_center, window_width=window_width,
+        patient_name="TESTPATIENT^SCANLINT",
+    )
+    burned_ds.BurnedInAnnotation = "NO"
+    burned_ds.save_as(str(directory / "multiframe-burned-in.dcm"), write_like_original=False)
+
+    row0, col0, row1, col1 = burned_in_bounding_box()
+    text_mask = np.zeros((MULTIFRAME_BURNED_IN_SIZE, MULTIFRAME_BURNED_IN_SIZE), dtype=bool)
+    for i, ch in enumerate(BURNED_IN_TEXT):
+        for gy, row in enumerate(GLYPHS[ch]):
+            for gx, bit in enumerate(row):
+                if bit == "1":
+                    text_mask[row0 + gy, col0 + i * GLYPH_WIDTH + gx] = True
+    ok(
+        "multiframe-burned-in.dcm declares NO; frame 3 has text-value pixels inside its bounding box and frames 1/2 do not",
+        str(burned_ds.BurnedInAnnotation) == "NO"
+        and bool((frame3[text_mask] == BURNED_IN_MAX).all())
+        and not bool((frame1[text_mask] == BURNED_IN_MAX).any())
+        and not bool((frame2[text_mask] == BURNED_IN_MAX).any()),
+    )
+    ok(
+        "frame 3 equals frame 1 everywhere outside the text mask (the text is the only difference)",
+        bool((frame3[~text_mask] == frame1[~text_mask]).all()),
+    )
+    ok("frames 1 and 2 disagree somewhere (the radius change is visible)", bool((frame1 != frame2).any()))
+
+    # --- multiframe-jpeg.dcm ---
+    fragments = []
+    for f in range(MULTIFRAME_JPEG_FRAMES):
+        grid = multiframe_jpeg_block_grid(f)
+        jpeg_bytes, _stuff = encode_jpeg_baseline([grid], MULTIFRAME_JPEG_SIZE, MULTIFRAME_JPEG_SIZE)
+        fragments.append(jpeg_bytes)
+
+    jpeg_ds = build_jpeg_dataset(
+        sop_uid=MULTIFRAME_JPEG_SOP_UID, study_uid=MULTIFRAME_JPEG_STUDY_UID, series_uid=MULTIFRAME_JPEG_SERIES_UID,
+        rows=MULTIFRAME_JPEG_SIZE, columns=MULTIFRAME_JPEG_SIZE, samples_per_pixel=1, photometric="MONOCHROME2",
+        patient_name="SCANLINT^PIXELTEST", jpeg_fragments=fragments,
+    )
+    jpeg_ds.save_as(str(directory / "multiframe-jpeg.dcm"), write_like_original=False)
+
+    fp = DicomBytesIO(jpeg_ds.PixelData)
+    fp.is_little_endian = True
+    has_bot, _offsets = get_frame_offsets(fp)
+    decoded_fragments = decode_data_sequence(jpeg_ds.PixelData)
+    ok(
+        "multiframe-jpeg.dcm has a Basic Offset Table and exactly one fragment per frame",
+        has_bot and len(decoded_fragments) == MULTIFRAME_JPEG_FRAMES,
+    )
+    ok("each of multiframe-jpeg.dcm's three fragments is distinct", len({bytes(f) for f in decoded_fragments}) == MULTIFRAME_JPEG_FRAMES)
+    for f, fragment in enumerate(decoded_fragments):
+        markers = parse_jpeg_markers(bytes(fragment))
+        sof0 = markers["SOF0"]["data"]
+        sof_rows = int.from_bytes(sof0[1:3], "big")
+        sof_cols = int.from_bytes(sof0[3:5], "big")
+        if not (sof_rows == MULTIFRAME_JPEG_SIZE and sof_cols == MULTIFRAME_JPEG_SIZE):
+            raise SystemExit(f"multiframe-jpeg.dcm frame {f}: SOF0 does not match {MULTIFRAME_JPEG_SIZE}x{MULTIFRAME_JPEG_SIZE}")
+    ok("each fragment's own SOF0 matches Rows/Columns", True)
+
+    # --- manifest entries ---
+
+    burned_coords = multiframe_burned_in_coord_entries((frame1, frame2, frame3), window_center, window_width)
+    jpeg_coords = multiframe_jpeg_coord_entries()
+
+    multiframe_entries = [
+        {
+            "file": "multiframe-burned-in.dcm",
+            "transferSyntaxUid": EXPLICIT_VR_LITTLE_ENDIAN,
+            "rows": MULTIFRAME_BURNED_IN_SIZE,
+            "columns": MULTIFRAME_BURNED_IN_SIZE,
+            "bitsAllocated": PATTERN_BITS_ALLOCATED,
+            "bitsStored": PATTERN_BITS_STORED,
+            "highBit": PATTERN_HIGH_BIT,
+            "pixelRepresentation": 0,
+            "photometricInterpretation": "MONOCHROME2",
+            "samplesPerPixel": 1,
+            "numberOfFrames": MULTIFRAME_BURNED_IN_FRAMES,
+            "fragmentCount": None,  # native, not encapsulated - there are no fragments
+            "hasBasicOffsetTable": None,
+            "windowCenter": window_center,
+            "windowWidth": window_width,
+            "note": "A window is declared (unlike burned-in.dcm) specifically so it stays fixed across "
+                    "all three frames - see 3.7 and 3.8's own write-up on why a per-frame fallback "
+                    "window would confound stepping.",
+            "frameFormula": {
+                "frame1": f"make_phantom(radius={MULTIFRAME_BURNED_IN_RADIUS_1})",
+                "frame2": f"make_phantom(radius={MULTIFRAME_BURNED_IN_RADIUS_2})",
+                "frame3": f"frame1, plus TESTPATIENT at the maximum stored value ({BURNED_IN_MAX}) using the existing 8x12 GLYPHS",
+            },
+            "expectedOutputByFrame": burned_coords,
+            "burnedInAnnotation": {
+                "declared": "NO",
+                "deliberatelyFalse": True,
+                "note": "As burned-in.dcm's declaration is, and for the same reason: frame 3 contains "
+                        "the legible text 'TESTPATIENT' while the metadata declares no burned-in "
+                        "annotation. This is 3.8's demonstration that the gap 3.7 found - one frame "
+                        "shown, nothing said about the rest - is a wrong answer, not just a limitation.",
+                "text": BURNED_IN_TEXT,
+                "textFrame": 3,
+                "boundingBox": {"rowStart": row0, "colStart": col0, "rowEnd": row1, "colEnd": col1},
+                "textValue": BURNED_IN_MAX,
+            },
+        },
+        {
+            "file": "multiframe-jpeg.dcm",
+            "transferSyntaxUid": JPEG_BASELINE_UID,
+            "rows": MULTIFRAME_JPEG_SIZE,
+            "columns": MULTIFRAME_JPEG_SIZE,
+            "bitsAllocated": 8,
+            "bitsStored": 8,
+            "highBit": 7,
+            "pixelRepresentation": 0,
+            "photometricInterpretation": "MONOCHROME2",
+            "samplesPerPixel": 1,
+            "numberOfFrames": MULTIFRAME_JPEG_FRAMES,
+            "fragmentCount": MULTIFRAME_JPEG_FRAMES,
+            "hasBasicOffsetTable": True,
+            "blockSize": JPEG_BLOCK_SIZE,
+            "blockFormula": "value(bx, by, f) = (160 if (bx + by) % 2 == 0 else 96) + 2 * by + 30 * f, for bx, by each in [0, 8), f in [0, 3)",
+            "jpegFragmentSha256ByFrame": [hashlib.sha256(f).hexdigest() for f in fragments],
+            "pixelDataSha256": hashlib.sha256(jpeg_ds.PixelData).hexdigest(),
+            "expectedOutputByFrame": jpeg_coords,
+            "tolerance": 0,
+            "note": "One fragment per frame, in declared order, with a Basic Offset Table - the first "
+                    "committed fixture to exercise offset-table frame resolution (3.6) in a browser "
+                    "rather than a Node-constructed test file. Frame 0 reproduces pattern-jpeg.dcm's "
+                    "own values exactly (the +30*f term is zero there).",
+        },
+    ]
+
+    manifest["files"].extend(multiframe_entries)
+    manifest_path.write_bytes((json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
+
+    print(f"wrote 2 multiframe fixture(s) to {directory}")
+    for name in ["multiframe-burned-in.dcm", "multiframe-jpeg.dcm"]:
+        p = directory / name
+        print(f"  {name:<24} {p.stat().st_size:>7} bytes  sha256 {_sha(p)}")
+    print(f"wrote {manifest_path} ({manifest_path.stat().st_size} bytes, sha256 {_sha(manifest_path)})")
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -2291,6 +2599,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     build_series(root)
     build_pixels(root)
     build_jpeg_pixels(root)
+    build_multiframe_pixels(root)
 
 
 if __name__ == "__main__":

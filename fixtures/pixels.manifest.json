@@ -1134,6 +1134,396 @@
         "textValue": 255,
         "stripValue": 64
       }
+    },
+    {
+      "file": "multiframe-burned-in.dcm",
+      "transferSyntaxUid": "1.2.840.10008.1.2.1",
+      "rows": 128,
+      "columns": 128,
+      "bitsAllocated": 16,
+      "bitsStored": 12,
+      "highBit": 11,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME2",
+      "samplesPerPixel": 1,
+      "numberOfFrames": 3,
+      "fragmentCount": null,
+      "hasBasicOffsetTable": null,
+      "windowCenter": 2149.5,
+      "windowWidth": 3891.0,
+      "note": "A window is declared (unlike burned-in.dcm) specifically so it stays fixed across all three frames - see 3.7 and 3.8's own write-up on why a per-frame fallback window would confound stepping.",
+      "frameFormula": {
+        "frame1": "make_phantom(radius=40)",
+        "frame2": "make_phantom(radius=44)",
+        "frame3": "frame1, plus TESTPATIENT at the maximum stored value (4095) using the existing 8x12 GLYPHS"
+      },
+      "expectedOutputByFrame": [
+        [
+          {
+            "x": 0,
+            "y": 0,
+            "stored": 224,
+            "grey": 1
+          },
+          {
+            "x": 127,
+            "y": 127,
+            "stored": 1019,
+            "grey": 53
+          },
+          {
+            "x": 64,
+            "y": 64,
+            "stored": 3001,
+            "grey": 183
+          },
+          {
+            "x": 64,
+            "y": 20,
+            "stored": 472,
+            "grey": 18
+          },
+          {
+            "x": 20,
+            "y": 58,
+            "stored": 458,
+            "grey": 17
+          },
+          {
+            "x": 36,
+            "y": 58,
+            "stored": 3016,
+            "grey": 184
+          },
+          {
+            "x": 0,
+            "y": 127,
+            "stored": 602,
+            "grey": 26
+          },
+          {
+            "x": 127,
+            "y": 0,
+            "stored": 607,
+            "grey": 26
+          }
+        ],
+        [
+          {
+            "x": 0,
+            "y": 0,
+            "stored": 224,
+            "grey": 1
+          },
+          {
+            "x": 127,
+            "y": 127,
+            "stored": 1019,
+            "grey": 53
+          },
+          {
+            "x": 64,
+            "y": 64,
+            "stored": 3001,
+            "grey": 183
+          },
+          {
+            "x": 64,
+            "y": 20,
+            "stored": 3008,
+            "grey": 184
+          },
+          {
+            "x": 20,
+            "y": 58,
+            "stored": 458,
+            "grey": 17
+          },
+          {
+            "x": 36,
+            "y": 58,
+            "stored": 3016,
+            "grey": 184
+          },
+          {
+            "x": 0,
+            "y": 127,
+            "stored": 602,
+            "grey": 26
+          },
+          {
+            "x": 127,
+            "y": 0,
+            "stored": 607,
+            "grey": 26
+          }
+        ],
+        [
+          {
+            "x": 0,
+            "y": 0,
+            "stored": 224,
+            "grey": 1
+          },
+          {
+            "x": 127,
+            "y": 127,
+            "stored": 1019,
+            "grey": 53
+          },
+          {
+            "x": 64,
+            "y": 64,
+            "stored": 4095,
+            "grey": 255
+          },
+          {
+            "x": 64,
+            "y": 20,
+            "stored": 472,
+            "grey": 18
+          },
+          {
+            "x": 20,
+            "y": 58,
+            "stored": 4095,
+            "grey": 255
+          },
+          {
+            "x": 36,
+            "y": 58,
+            "stored": 3016,
+            "grey": 184
+          },
+          {
+            "x": 0,
+            "y": 127,
+            "stored": 602,
+            "grey": 26
+          },
+          {
+            "x": 127,
+            "y": 0,
+            "stored": 607,
+            "grey": 26
+          }
+        ]
+      ],
+      "burnedInAnnotation": {
+        "declared": "NO",
+        "deliberatelyFalse": true,
+        "note": "As burned-in.dcm's declaration is, and for the same reason: frame 3 contains the legible text 'TESTPATIENT' while the metadata declares no burned-in annotation. This is 3.8's demonstration that the gap 3.7 found - one frame shown, nothing said about the rest - is a wrong answer, not just a limitation.",
+        "text": "TESTPATIENT",
+        "textFrame": 3,
+        "boundingBox": {
+          "rowStart": 58,
+          "colStart": 20,
+          "rowEnd": 70,
+          "colEnd": 108
+        },
+        "textValue": 4095
+      }
+    },
+    {
+      "file": "multiframe-jpeg.dcm",
+      "transferSyntaxUid": "1.2.840.10008.1.2.4.50",
+      "rows": 64,
+      "columns": 64,
+      "bitsAllocated": 8,
+      "bitsStored": 8,
+      "highBit": 7,
+      "pixelRepresentation": 0,
+      "photometricInterpretation": "MONOCHROME2",
+      "samplesPerPixel": 1,
+      "numberOfFrames": 3,
+      "fragmentCount": 3,
+      "hasBasicOffsetTable": true,
+      "blockSize": 8,
+      "blockFormula": "value(bx, by, f) = (160 if (bx + by) % 2 == 0 else 96) + 2 * by + 30 * f, for bx, by each in [0, 8), f in [0, 3)",
+      "jpegFragmentSha256ByFrame": [
+        "4fbebe6da3e44cdc4ae52b972039db3b653f09811e1cec2a5ac36ec9c6b2e678",
+        "b4c98f8aad3c7a964d26337f29abf2ddcd67bcd6314714a038b4a63a5515cb92",
+        "f09dadb2126cc6b8f7a511c53866a10c137f41b8aab22ea9b071aff6dbcdf751"
+      ],
+      "pixelDataSha256": "22cfa5d385d3412dd6691b85d1802f6b44da966ef6a0ae49d697bfd9e9573ddd",
+      "expectedOutputByFrame": [
+        [
+          {
+            "x": 0,
+            "y": 0,
+            "blockX": 0,
+            "blockY": 0,
+            "value": 160
+          },
+          {
+            "x": 7,
+            "y": 0,
+            "blockX": 0,
+            "blockY": 0,
+            "value": 160
+          },
+          {
+            "x": 8,
+            "y": 0,
+            "blockX": 1,
+            "blockY": 0,
+            "value": 96
+          },
+          {
+            "x": 63,
+            "y": 0,
+            "blockX": 7,
+            "blockY": 0,
+            "value": 96
+          },
+          {
+            "x": 0,
+            "y": 63,
+            "blockX": 0,
+            "blockY": 7,
+            "value": 110
+          },
+          {
+            "x": 63,
+            "y": 63,
+            "blockX": 7,
+            "blockY": 7,
+            "value": 174
+          },
+          {
+            "x": 32,
+            "y": 32,
+            "blockX": 4,
+            "blockY": 4,
+            "value": 168
+          },
+          {
+            "x": 31,
+            "y": 32,
+            "blockX": 3,
+            "blockY": 4,
+            "value": 104
+          }
+        ],
+        [
+          {
+            "x": 0,
+            "y": 0,
+            "blockX": 0,
+            "blockY": 0,
+            "value": 190
+          },
+          {
+            "x": 7,
+            "y": 0,
+            "blockX": 0,
+            "blockY": 0,
+            "value": 190
+          },
+          {
+            "x": 8,
+            "y": 0,
+            "blockX": 1,
+            "blockY": 0,
+            "value": 126
+          },
+          {
+            "x": 63,
+            "y": 0,
+            "blockX": 7,
+            "blockY": 0,
+            "value": 126
+          },
+          {
+            "x": 0,
+            "y": 63,
+            "blockX": 0,
+            "blockY": 7,
+            "value": 140
+          },
+          {
+            "x": 63,
+            "y": 63,
+            "blockX": 7,
+            "blockY": 7,
+            "value": 204
+          },
+          {
+            "x": 32,
+            "y": 32,
+            "blockX": 4,
+            "blockY": 4,
+            "value": 198
+          },
+          {
+            "x": 31,
+            "y": 32,
+            "blockX": 3,
+            "blockY": 4,
+            "value": 134
+          }
+        ],
+        [
+          {
+            "x": 0,
+            "y": 0,
+            "blockX": 0,
+            "blockY": 0,
+            "value": 220
+          },
+          {
+            "x": 7,
+            "y": 0,
+            "blockX": 0,
+            "blockY": 0,
+            "value": 220
+          },
+          {
+            "x": 8,
+            "y": 0,
+            "blockX": 1,
+            "blockY": 0,
+            "value": 156
+          },
+          {
+            "x": 63,
+            "y": 0,
+            "blockX": 7,
+            "blockY": 0,
+            "value": 156
+          },
+          {
+            "x": 0,
+            "y": 63,
+            "blockX": 0,
+            "blockY": 7,
+            "value": 170
+          },
+          {
+            "x": 63,
+            "y": 63,
+            "blockX": 7,
+            "blockY": 7,
+            "value": 234
+          },
+          {
+            "x": 32,
+            "y": 32,
+            "blockX": 4,
+            "blockY": 4,
+            "value": 228
+          },
+          {
+            "x": 31,
+            "y": 32,
+            "blockX": 3,
+            "blockY": 4,
+            "value": 164
+          }
+        ]
+      ],
+      "tolerance": 0,
+      "note": "One fragment per frame, in declared order, with a Basic Offset Table - the first committed fixture to exercise offset-table frame resolution (3.6) in a browser rather than a Node-constructed test file. Frame 0 reproduces pattern-jpeg.dcm's own values exactly (the +30*f term is zero there)."
     }
   ],
   "jpegFormat": {

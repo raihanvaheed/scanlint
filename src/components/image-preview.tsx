@@ -53,6 +53,16 @@ function formatWindow(window: WindowSetting): string {
   return `${Math.round(window.center)} / ${Math.round(window.width)}`;
 }
 
+// Composed from the parts actually present (1.8: never promise keyboard behaviour that is not
+// there, in either direction) - a window and a frame count are independent, and a file can have
+// either, neither, or both.
+function canvasAriaLabel(fileLabel: string, hasWindow: boolean, hasFrames: boolean): string {
+  let label = `Decoded image of ${fileLabel}. This is medical pixel data and cannot otherwise be described.`;
+  if (hasWindow) label += " When focused, arrow keys adjust brightness and contrast; hold shift for larger steps.";
+  if (hasFrames) label += " Page Up and Page Down move between frames; Home and End jump to the first and last frame.";
+  return label;
+}
+
 // Not part of any one message (3.6): a reader who sees a bare failure where the preview should be
 // may reasonably conclude the whole analysis failed and distrust findings that are in fact complete
 // - the worse of the two errors, for a tool whose entire claim is about what it found in the
@@ -87,16 +97,49 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
   const [reason, setReason] = useState<DecodeReason | undefined>(undefined);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const windowOverride = useRef<WindowSetting | null>(null);
+  // What the reader asked for, carried across a slice step the same way windowOverride is (3.4a) -
+  // someone examining frame 12 of a cine series wants frame 12 on the next slice, not frame 1 (3.8).
+  // Deliberately NOT the same as what's displayed (image.frame): a slice step through a shorter
+  // file clamps the display, but must not overwrite this with the clamped value, or the original
+  // request is lost for good the moment a reader passes through one shorter file (3.8a) - including
+  // a single-frame slice, which clamps to 0 with no control on screen to show it happened. Only the
+  // frame controls themselves (Previous/Next/Home/End) are allowed to change what's requested, and
+  // they always derive the new value from what's currently displayed, not from this ref - see
+  // applyFrame's callers. Starts at 0, the only value every file is guaranteed to have; resets to 0
+  // for free on a genuinely new file, since picking one unmounts this component rather than just
+  // changing its fileKey prop (see ImagePreviewProps.fileKey).
+  const requestedFrame = useRef(0);
   const dragStart = useRef<{ x: number; y: number; window: WindowSetting } | null>(null);
   const requestSeq = useRef(0);
 
-  // A new slice: carries the current window across (3.4a) - someone stepping through a series to
-  // find faint text would otherwise have to find it again on every slice, which defeats the reason
-  // they were stepping. `windowOverride` is left exactly as it is; `null` (never adjusted) still
-  // lets the new slice pick its own declared value or fallback, same as before. The old image stays
-  // exactly where it is (state untouched) until this one resolves.
+  // A new slice: carries the current window and requested frame across (3.4a, 3.8) - the old image
+  // stays exactly where it is (state untouched) until the new one resolves.
+  //
+  // The frame needs its own dance: requesting an out-of-range frame is a plain failure (correctly -
+  // it is a genuine defect to ask for a frame that is not there), not something decodeImage clamps
+  // for itself, so clamping has to happen here, and it needs the new file's own frame count first.
+  // When the requested frame is already 0 (the overwhelmingly common case - most files are
+  // single-frame, and most sessions never step a frame at all) this is exactly one decode, same as
+  // before 3.8. Only a requested frame greater than 0 risks landing out of range, so only that case
+  // pays for a second, corrective decode once the first reveals how many frames the new file has.
+  //
+  // requestedFrame.current is read here but never written: what's displayed is allowed to clamp
+  // down for a file that can't show it, but what's remembered must not (3.8a) - a reader who was on
+  // frame 12 and steps through an 8-frame file, then into another 25-frame one, should land back on
+  // 12, not on "8, and then forgotten".
   useEffect(() => {
-    if (visible) void runDecode(windowOverride.current);
+    if (!visible) return;
+    const requested = requestedFrame.current;
+    if (requested === 0) {
+      void runDecode(windowOverride.current, 0);
+      return;
+    }
+    void (async () => {
+      const decoded = await runDecode(windowOverride.current, 0);
+      if (!decoded) return;
+      const displayed = Math.min(requested, decoded.numberOfFrames - 1);
+      if (displayed !== 0) void runDecode(windowOverride.current, displayed);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileKey]);
 
@@ -115,36 +158,60 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [image?.window?.center, image?.window?.width]);
 
-  async function runDecode(window: WindowSetting | null) {
+  // Returns the decoded image on success, so the fileKey-change effect can read the new file's own
+  // numberOfFrames back without keeping a second copy of decode's own result handling. Returns
+  // undefined on any failure, supersession, or going stale - every case where there is nothing a
+  // caller could act on.
+  async function runDecode(window: WindowSetting | null, frame: number): Promise<DecodedImage | undefined> {
     const seq = ++requestSeq.current;
     setPhase("decoding");
     let bytes: ArrayBuffer;
     try {
       bytes = await getBytes();
     } catch (e) {
-      if (seq !== requestSeq.current) return;
+      if (seq !== requestSeq.current) return undefined;
       setPhase("error");
       setMessage(messageOf(e));
       setReason(undefined);
-      return;
+      return undefined;
     }
-    const outcome = await decode(bytes, window ? { window } : undefined);
-    if (seq !== requestSeq.current) return; // a newer runDecode call has since started
+    const outcome = await decode(bytes, window ? { frame, window } : { frame });
+    if (seq !== requestSeq.current) return undefined; // a newer runDecode call has since started
 
     if (!outcome.ok) {
-      if ("superseded" in outcome && outcome.superseded) return; // section 7: nothing rendered
+      if ("superseded" in outcome && outcome.superseded) return undefined; // section 7: nothing rendered
       setPhase("error");
       setMessage(outcome.message);
       setReason("reason" in outcome ? outcome.reason : undefined);
-      return;
+      return undefined;
     }
-    setImage({ width: outcome.width, height: outcome.height, rgba: new Uint8ClampedArray(outcome.rgba), window: outcome.window, transferSyntaxUid: outcome.transferSyntaxUid });
+    const decoded: DecodedImage = {
+      width: outcome.width,
+      height: outcome.height,
+      rgba: new Uint8ClampedArray(outcome.rgba),
+      window: outcome.window,
+      transferSyntaxUid: outcome.transferSyntaxUid,
+      frame: outcome.frame,
+      numberOfFrames: outcome.numberOfFrames,
+    };
+    setImage(decoded);
     setPhase("ready");
+    return decoded;
   }
 
   function applyWindow(next: WindowSetting) {
     windowOverride.current = next;
-    void runDecode(next);
+    void runDecode(next, requestedFrame.current);
+  }
+
+  // The only place requestedFrame.current is written outside the initial 0. Every caller below
+  // derives `next` from `image.frame` - what's currently displayed - never from the old requested
+  // value, so using a control always collapses the request down to the reader's actual choice
+  // (3.8a): stepping off a frame that only exists because of a clamp means asking for exactly where
+  // you land, not "whatever was originally requested, plus or minus one".
+  function applyFrame(next: number) {
+    requestedFrame.current = next;
+    void runDecode(windowOverride.current, next);
   }
 
   function onToggle() {
@@ -152,12 +219,34 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
     setVisible(next);
     // Opening it is what starts the worker - never decode while closed, and never decode again on
     // reopen if the image (or an in-flight decode) is already in hand.
-    if (next && phase === "idle") void runDecode(null);
+    if (next && phase === "idle") void runDecode(null, requestedFrame.current);
   }
 
   function onReset() {
     windowOverride.current = null;
-    void runDecode(null);
+    void runDecode(null, requestedFrame.current);
+  }
+
+  function onPreviousFrame() {
+    if (!image || image.frame <= 0) return;
+    applyFrame(image.frame - 1);
+  }
+
+  function onNextFrame() {
+    if (!image || image.frame >= image.numberOfFrames - 1) return;
+    applyFrame(image.frame + 1);
+  }
+
+  function onFirstFrame() {
+    if (!image || image.frame <= 0) return;
+    applyFrame(0);
+  }
+
+  function onLastFrame() {
+    if (!image) return;
+    const last = image.numberOfFrames - 1;
+    if (image.frame >= last) return;
+    applyFrame(last);
   }
 
   function onPointerDown(e: PointerEvent<HTMLCanvasElement>) {
@@ -181,6 +270,34 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLCanvasElement>) {
+    // Page Up/Down and Home/End move frames; arrow keys move the window. Two disjoint key sets on
+    // the same element, neither reads the other's keys, so there is nothing to arbitrate between
+    // them. 3.4 deferred a keyboard path for slice stepping; frames get one here because a 600-slice
+    // folder still has 2.5's clickable list as a second route, while two hundred frames inside one
+    // file have no route at all except the button - clicking it two hundred times is not a feature.
+    if (image && image.numberOfFrames > 1) {
+      if (e.key === "PageDown") {
+        onNextFrame();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "PageUp") {
+        onPreviousFrame();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Home") {
+        onFirstFrame();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "End") {
+        onLastFrame();
+        e.preventDefault();
+        return;
+      }
+    }
+
     if (!image?.window) return;
     const step = (image.window.width / 64) * (e.shiftKey ? 10 : 1);
     if (e.key === "ArrowLeft") applyWindow({ center: image.window.center, width: Math.max(1, image.window.width - step) });
@@ -228,11 +345,7 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
             height={image.height}
             tabIndex={0}
             role="img"
-            aria-label={
-              image.window
-                ? `Decoded image of ${fileLabel}. This is medical pixel data and cannot otherwise be described. When focused, arrow keys adjust brightness and contrast; hold shift for larger steps.`
-                : `Decoded image of ${fileLabel}. This is medical pixel data and cannot otherwise be described.`
-            }
+            aria-label={canvasAriaLabel(fileLabel, Boolean(image.window), image.numberOfFrames > 1)}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -242,7 +355,13 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
             className={`w-full max-w-[512px] cursor-crosshair touch-none rounded border border-rule ${FOCUS_RING}`}
           />
           <p className="mt-2 text-sm text-shade">
-            {`${image.width} × ${image.height} · ${formatTransferSyntax(image.transferSyntaxUid)}`}
+            {/* The frame segment sits next to the dimensions, not the encoding - it is part of what
+                the reader is looking at. No segment at all for a single-frame file (numberOfFrames
+                1 or absent): "frame 1 of 1" is clutter on almost every file in existence, the same
+                rule the window segment already follows. */}
+            {`${image.width} × ${image.height}`}
+            {image.numberOfFrames > 1 && ` · frame ${image.frame + 1} of ${image.numberOfFrames}`}
+            {` · ${formatTransferSyntax(image.transferSyntaxUid)}`}
             {image.window && ` · window ${formatWindow(image.window)}`}
           </p>
           {image.window ? (
@@ -255,25 +374,61 @@ export function ImagePreview({ fileKey, fileLabel, getBytes, decode, announce, s
         </div>
       )}
 
+      {/* Two independent control pairs (section 6): a slice is a different position in the body, a
+          frame is a different moment in time, and a reader needs the distinction, not a single
+          counter that discards it. Each renders only when its own axis has more than one position -
+          neither nested inside the other nor flattened into one.
+
+          Each pair is its own counter-above-buttons stack below `sm`, and a single row at `sm` and
+          up (3.8a) - `flex-wrap` alone let the second button wrap onto a line by itself, orphaned
+          rather than grouped. The buttons share a `display:contents` wrapper at `sm` so they stop
+          being one flex item and rejoin the row individually, in label-first DOM order reordered
+          back to previous/label/next with `order-*`. */}
+      {image !== null && image.numberOfFrames > 1 && (
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+          <span className="order-1 text-sm text-shade sm:order-2">{`Frame ${image.frame + 1} of ${image.numberOfFrames}`}</span>
+          <div className="order-2 flex gap-4 sm:contents">
+            <button
+              type="button"
+              disabled={image.frame <= 0}
+              onClick={onPreviousFrame}
+              className={`cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-ink hover:border-signal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-shade sm:order-1 ${FOCUS_RING}`}
+            >
+              Previous frame
+            </button>
+            <button
+              type="button"
+              disabled={image.frame >= image.numberOfFrames - 1}
+              onClick={onNextFrame}
+              className={`cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-ink hover:border-signal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-shade sm:order-3 ${FOCUS_RING}`}
+            >
+              Next frame
+            </button>
+          </div>
+        </div>
+      )}
+
       {stepping && (
-        <div className="mt-4 flex flex-wrap items-center gap-4">
-          <button
-            type="button"
-            disabled={!stepping.hasPrevious}
-            onClick={stepping.onPrevious}
-            className={`cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-ink hover:border-signal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-shade ${FOCUS_RING}`}
-          >
-            Previous slice
-          </button>
-          <span className="text-sm text-shade">{stepping.label}</span>
-          <button
-            type="button"
-            disabled={!stepping.hasNext}
-            onClick={stepping.onNext}
-            className={`cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-ink hover:border-signal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-shade ${FOCUS_RING}`}
-          >
-            Next slice
-          </button>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+          <span className="order-1 text-sm text-shade sm:order-2">{stepping.label}</span>
+          <div className="order-2 flex gap-4 sm:contents">
+            <button
+              type="button"
+              disabled={!stepping.hasPrevious}
+              onClick={stepping.onPrevious}
+              className={`cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-ink hover:border-signal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-shade sm:order-1 ${FOCUS_RING}`}
+            >
+              Previous slice
+            </button>
+            <button
+              type="button"
+              disabled={!stepping.hasNext}
+              onClick={stepping.onNext}
+              className={`cursor-pointer rounded-md border-2 border-shade px-4 py-1.5 text-ink hover:border-signal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-shade sm:order-3 ${FOCUS_RING}`}
+            >
+              Next slice
+            </button>
+          </div>
         </div>
       )}
     </div>
